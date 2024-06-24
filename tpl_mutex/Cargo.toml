@@ -1,0 +1,11 @@
+[package]
+name = "tpl_mutex"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/tpl_mutex.rs"
+
+[dependencies]
+r-efi = { workspace=true }
+boot_services = { workspace=true }
