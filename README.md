@@ -72,7 +72,7 @@ Guidance and requirements:
 
 ## Issues
 
-Please open any issues in the [issues section](https://github.com/microsoft/mu_rust_hid/issues).
+Please open any issues in the [issues section](https://github.com/microsoft/mu_rust_helperss/issues).
 
 ## Code of Conduct
 
