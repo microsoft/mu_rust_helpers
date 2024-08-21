@@ -6,5 +6,14 @@ edition = "2021"
 [lib]
 path = "src/boot_services.rs"
 
+[features]
+default = []
+global_allocator = []
+mockall = ["dep:mockall"]
+
 [dependencies]
-r-efi = { workspace=true }
+r-efi = { workspace = true }
+mockall = { version = "*", optional = true }
+
+[dev-dependencies]
+mockall = { version = "0.12.1" }
