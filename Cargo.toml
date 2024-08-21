@@ -5,7 +5,42 @@ members = [
     "tpl_mutex"
 ]
 
+[workspace.package]
+repository = "https://github.com/microsoft/mu_rust_helpers"
+license = "BSD-2-Clause-Patent"
+edition = "2021"
+include = [
+  "Cargo.toml",
+  "LICENSE*",
+  "README.md",
+  "examples/**/*"
+]
+
 [workspace.dependencies]
 r-efi = "5.0.0"
 boot_services = { path="./boot_services" }
 tpl_mutex = { path="./tpl_mutex" }
+
+[package]
+name = "mu_rust_helpers"
+version = "0.0.1"
+description = ""
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+include.workspace = true
+
+[features]
+default = ["boot_services", "tpl_mutex"]
+boot_services = ["dep:boot_services"]
+tpl_mutex = ["dep:tpl_mutex"]
+
+[dependencies]
+boot_services = { path = "./boot_services", version = "0.1.0", optional = true }
+tpl_mutex = { path = "./tpl_mutex", version = "0.1.0", optional = true }
+
+[dev-dependencies]
+r-efi = { workspace = true }
+boot_services = { path = "./boot_services", features = ["mockall"]}
+
+
