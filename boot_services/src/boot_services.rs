@@ -367,9 +367,11 @@ pub trait BootServices: Sized {
         &self,
         handle: efi::Handle,
         protocol: &P,
-    ) -> Result<Option<&'static mut I>, efi::Status> {
+    ) -> Result<&'static mut I, efi::Status> {
         //SAFETY: The generic Protocol ensure that the interfaces is the right type for the specified protocol.
-        unsafe { self.handle_protocol_unchecked(handle, protocol.protocol_guid()).map(|i| (i as *mut I).as_mut()) }
+        unsafe {
+            self.handle_protocol_unchecked(handle, protocol.protocol_guid()).map(|i| (i as *mut I).as_mut().unwrap())
+        }
     }
 
     fn handle_protocol_unchecked(&self, handle: efi::Handle, protocol: &efi::Guid) -> Result<*mut c_void, efi::Status>;
@@ -447,14 +449,14 @@ pub trait BootServices: Sized {
         &self,
         protocol: &P,
         registration: Option<Registration>,
-    ) -> Result<Option<&'static mut I>, efi::Status> {
+    ) -> Result<&'static mut I, efi::Status> {
         //SAFETY: The generic Protocol ensure that the interfaces is the right type for the specified protocol.
         unsafe {
-            let interface = self.locate_protocol_unchecked(
+            self.locate_protocol_unchecked(
                 protocol.protocol_guid(),
                 registration.map_or(ptr::null_mut(), |r| r.as_ptr()),
-            )?;
-            Ok((interface as *mut I).as_mut())
+            )
+            .map(|ptr| (ptr as *mut I).as_mut().unwrap())
         }
     }
 
