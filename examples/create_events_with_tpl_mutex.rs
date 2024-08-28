@@ -46,15 +46,15 @@ fn main() {
   let ctx = Box::new(MyContext {
     _some_immutable_state: 0,
     _some_other_immutable_state: ptr::null_mut(),
-    some_mutable_state: TplMutex::new(&BOOT_SERVICE, Tpl::APPLICATION, 0),
-    _some_other_mutable_state: TplMutex::new(&BOOT_SERVICE, Tpl::APPLICATION, String::new()),
+    some_mutable_state: TplMutex::new(&BOOT_SERVICE, Tpl::CALLBACK, 0),
+    _some_other_mutable_state: TplMutex::new(&BOOT_SERVICE, Tpl::CALLBACK, String::new()),
   });
 
   let ctx = Box::leak::<'static>(ctx) as &MyContext;
 
   match BOOT_SERVICE.create_event(
     EventType::RUNTIME | EventType::NOTIFY_SIGNAL,
-    Tpl::APPLICATION,
+    Tpl::CALLBACK,
     Some(event_notify_callback_tpl_mutex),
     ctx,
   ) {
@@ -64,7 +64,7 @@ fn main() {
 
   match BOOT_SERVICE.create_event(
     EventType::RUNTIME | EventType::NOTIFY_SIGNAL,
-    Tpl::APPLICATION,
+    Tpl::CALLBACK,
     Some(event_notify_callback_tpl_mutex_2),
     Some(ctx),
   ) {
@@ -72,7 +72,7 @@ fn main() {
     Err(_status) => (),
   };
 
-  match BOOT_SERVICE.create_event(EventType::RUNTIME, Tpl::APPLICATION, Some(event_notify_callback_void), Box::new(()))
+  match BOOT_SERVICE.create_event(EventType::RUNTIME, Tpl::CALLBACK, Some(event_notify_callback_void), Box::new(()))
   {
     Ok(_event) => (),
     Err(_status) => (),

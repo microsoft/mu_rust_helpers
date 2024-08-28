@@ -106,7 +106,7 @@ pub trait BootServices: Sized {
         T: StaticPtr + 'static,
         <T as StaticPtr>::Pointee: Sized + 'static,
     {
-        //SAFETY: EventCtxMutPtr generic is used to guaranteed that rust borowing and rules are meet.
+        //SAFETY: ['StaticPtr`] generic is used to guaranteed that rust borowing and rules are meet.
         unsafe {
             self.create_event_unchecked(
                 event_type,
@@ -158,7 +158,7 @@ pub trait BootServices: Sized {
         T: StaticPtr + 'static,
         <T as StaticPtr>::Pointee: Sized + 'static,
     {
-        //SAFETY: EventCtxMutPtr generic is used to guaranteed that rust borowing and rules are meet.
+        //SAFETY: [`StaticPtr`] generic is used to guaranteed that rust borowing and rules are meet.
         unsafe {
             self.create_event_ex_unchecked(
                 event_type,
@@ -268,7 +268,7 @@ pub trait BootServices: Sized {
 
     fn allocate_pool(&self, pool_type: MemoryType, size: usize) -> Result<*mut u8, efi::Status>;
 
-    fn allocate_pool_for_type<T>(&self, pool_type: MemoryType) -> Result<*mut T, efi::Status> {
+    fn allocate_pool_for_type<T: 'static>(&self, pool_type: MemoryType) -> Result<*mut T, efi::Status> {
         let ptr = self.allocate_pool(pool_type, mem::size_of::<T>())?;
         Ok(ptr as *mut T)
     }
@@ -667,11 +667,11 @@ impl BootServices for StandardBootServices<'_> {
             ptr::addr_of_mut!(descriptor_size),
             ptr::addr_of_mut!(descriptor_version),
         ) {
-            s if s == efi::Status::BUFFER_TOO_SMALL => memory_map_size += 64, // add more space in case allocation makes the memory map bigger.
+            s if s == efi::Status::BUFFER_TOO_SMALL => memory_map_size += 0x400, // add more space in case allocation makes the memory map bigger.
             _ => (),
         };
 
-        let buffer = self.allocate_pool(MemoryType::BootServicesData, memory_map_size).map_err(|s| (s, 0))?;
+        let buffer = self.allocate_pool(MemoryType::BOOT_SERVICES_DATA, memory_map_size).map_err(|s| (s, 0))?;
 
         match get_memory_map(
             ptr::addr_of_mut!(memory_map_size),
@@ -808,7 +808,7 @@ impl BootServices for StandardBootServices<'_> {
         let mut buffer_size = 0;
         locate_handle(search_type.into(), protocol, search_key, ptr::addr_of_mut!(buffer_size), ptr::null_mut());
 
-        let buffer = self.allocate_pool(MemoryType::BootServicesData, buffer_size)?;
+        let buffer = self.allocate_pool(MemoryType::BOOT_SERVICES_DATA, buffer_size)?;
 
         match locate_handle(
             search_type.into(),
@@ -1420,7 +1420,7 @@ mod test {
     #[should_panic = "function not initialize."]
     fn test_allocate_pages_not_init() {
         let boot_services = boot_services!();
-        let _ = boot_services.allocate_pages(AllocType::AnyPage, MemoryType::ACPIMemoryNVS, 0);
+        let _ = boot_services.allocate_pages(AllocType::AnyPage, MemoryType::ACPI_MEMORY_NVS, 0);
     }
 
     #[test]
@@ -1435,7 +1435,7 @@ mod test {
         ) -> efi::Status {
             let expected_alloc_type: efi::AllocateType = AllocType::AnyPage.into();
             assert_eq!(expected_alloc_type, alloc_type);
-            let expected_mem_type: efi::MemoryType = MemoryType::MemoryMappedIO.into();
+            let expected_mem_type: efi::MemoryType = MemoryType::MEMORY_MAPPED_IO.into();
             assert_eq!(expected_mem_type, mem_type);
             assert_eq!(4, nb_pages);
             assert_ne!(ptr::null_mut(), memory);
@@ -1444,7 +1444,7 @@ mod test {
             efi::Status::SUCCESS
         }
 
-        let status = boot_services.allocate_pages(AllocType::AnyPage, MemoryType::MemoryMappedIO, 4);
+        let status = boot_services.allocate_pages(AllocType::AnyPage, MemoryType::MEMORY_MAPPED_IO, 4);
 
         assert!(matches!(status, Ok(17)));
     }
@@ -1461,7 +1461,7 @@ mod test {
         ) -> efi::Status {
             let expected_alloc_type: efi::AllocateType = AllocType::Address(17).into();
             assert_eq!(expected_alloc_type, alloc_type);
-            let expected_mem_type: efi::MemoryType = MemoryType::MemoryMappedIO.into();
+            let expected_mem_type: efi::MemoryType = MemoryType::MEMORY_MAPPED_IO.into();
             assert_eq!(expected_mem_type, mem_type);
             assert_eq!(4, nb_pages);
             assert_ne!(ptr::null_mut(), memory);
@@ -1469,7 +1469,7 @@ mod test {
             efi::Status::SUCCESS
         }
 
-        let status = boot_services.allocate_pages(AllocType::Address(17), MemoryType::MemoryMappedIO, 4);
+        let status = boot_services.allocate_pages(AllocType::Address(17), MemoryType::MEMORY_MAPPED_IO, 4);
         assert!(matches!(status, Ok(17)));
     }
 }

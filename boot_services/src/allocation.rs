@@ -11,24 +11,33 @@ pub enum AllocType {
     Address(usize),
 }
 
-#[derive(Debug)]
-pub enum MemoryType {
-    ReservedMemoryType,
-    LoaderCode,
-    LoaderData,
-    BootServicesCode,
-    BootServicesData,
-    RuntimeServicesCode,
-    RuntimeServicesData,
-    ConventionalMemory,
-    UnusableMemory,
-    ACPIReclaimMemory,
-    ACPIMemoryNVS,
-    MemoryMappedIO,
-    MemoryMappedIOPortSpace,
-    PalCode,
-    PersistentMemory,
-    UnacceptedMemoryType,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct MemoryType(u32);
+
+impl MemoryType {
+    pub const RESERVED_MEMORY_TYPE: MemoryType = MemoryType(efi::RESERVED_MEMORY_TYPE);
+    pub const LOADER_CODE: MemoryType = MemoryType(efi::LOADER_CODE);
+    pub const LOADER_DATA: MemoryType = MemoryType(efi::LOADER_DATA);
+    pub const BOOT_SERVICES_CODE: MemoryType = MemoryType(efi::BOOT_SERVICES_CODE);
+    pub const BOOT_SERVICES_DATA: MemoryType = MemoryType(efi::BOOT_SERVICES_DATA);
+    pub const RUNTIME_SERVICES_CODE: MemoryType = MemoryType(efi::RUNTIME_SERVICES_CODE);
+    pub const RUNTIME_SERVICES_DATA: MemoryType = MemoryType(efi::RUNTIME_SERVICES_DATA);
+    pub const CONVENTIONAL_MEMORY: MemoryType = MemoryType(efi::CONVENTIONAL_MEMORY);
+    pub const UNUSABLE_MEMORY: MemoryType = MemoryType(efi::UNUSABLE_MEMORY);
+    pub const ACPI_RECLAIM_MEMORY: MemoryType = MemoryType(efi::ACPI_RECLAIM_MEMORY);
+    pub const ACPI_MEMORY_NVS: MemoryType = MemoryType(efi::ACPI_MEMORY_NVS);
+    pub const MEMORY_MAPPED_IO: MemoryType = MemoryType(efi::MEMORY_MAPPED_IO);
+    pub const MEMORY_MAPPED_IO_PORT_SPACE: MemoryType = MemoryType(efi::MEMORY_MAPPED_IO_PORT_SPACE);
+    pub const PAL_CODE: MemoryType = MemoryType(efi::PAL_CODE);
+    pub const PERSISTENT_MEMORY: MemoryType = MemoryType(efi::PERSISTENT_MEMORY);
+    pub const UNACCEPTED_MEMORY_TYPE: MemoryType = MemoryType(efi::UNACCEPTED_MEMORY_TYPE);
+}
+
+impl Into<u32> for MemoryType {
+    fn into(self) -> u32 {
+        self.0
+    }
 }
 
 #[derive(Debug)]
@@ -89,29 +98,6 @@ impl Into<efi::AllocateType> for AllocType {
             AllocType::AnyPage => efi::ALLOCATE_ANY_PAGES,
             AllocType::MaxAddress(_) => efi::ALLOCATE_MAX_ADDRESS,
             AllocType::Address(_) => efi::ALLOCATE_ADDRESS,
-        }
-    }
-}
-
-impl Into<efi::MemoryType> for MemoryType {
-    fn into(self) -> efi::MemoryType {
-        match self {
-            Self::ReservedMemoryType => efi::RESERVED_MEMORY_TYPE,
-            Self::LoaderCode => efi::LOADER_CODE,
-            Self::LoaderData => efi::LOADER_DATA,
-            Self::BootServicesCode => efi::BOOT_SERVICES_CODE,
-            Self::BootServicesData => efi::BOOT_SERVICES_DATA,
-            Self::RuntimeServicesCode => efi::RUNTIME_SERVICES_CODE,
-            Self::RuntimeServicesData => efi::RUNTIME_SERVICES_DATA,
-            Self::ConventionalMemory => efi::CONVENTIONAL_MEMORY,
-            Self::UnusableMemory => efi::UNUSABLE_MEMORY,
-            Self::ACPIReclaimMemory => efi::ACPI_RECLAIM_MEMORY,
-            Self::ACPIMemoryNVS => efi::ACPI_MEMORY_NVS,
-            Self::MemoryMappedIO => efi::MEMORY_MAPPED_IO,
-            Self::MemoryMappedIOPortSpace => efi::MEMORY_MAPPED_IO_PORT_SPACE,
-            Self::PalCode => efi::PAL_CODE,
-            Self::PersistentMemory => efi::PERSISTENT_MEMORY,
-            Self::UnacceptedMemoryType => efi::UNACCEPTED_MEMORY_TYPE,
         }
     }
 }
