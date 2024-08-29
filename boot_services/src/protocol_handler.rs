@@ -3,55 +3,55 @@ use core::{ffi::c_void, ops::Deref, ptr::NonNull};
 use r_efi::efi;
 
 pub unsafe trait Protocol: Deref<Target = efi::Guid> {
-  type Interface;
-  fn protocol_guid(&self) -> &'static efi::Guid;
+    type Interface;
+    fn protocol_guid(&self) -> &'static efi::Guid;
 }
 
 pub type Registration = NonNull<c_void>;
 
 #[derive(Debug, Clone, Copy)]
 pub enum HandleSearchType {
-  AllHandle,
-  ByRegisterNotify(Registration),
-  ByProtocol(&'static efi::Guid),
+    AllHandle,
+    ByRegisterNotify(Registration),
+    ByProtocol(&'static efi::Guid),
 }
 
 impl Into<efi::LocateSearchType> for HandleSearchType {
-  fn into(self) -> efi::LocateSearchType {
-    match self {
-      HandleSearchType::AllHandle => efi::ALL_HANDLES,
-      HandleSearchType::ByRegisterNotify(_) => efi::BY_REGISTER_NOTIFY,
-      HandleSearchType::ByProtocol(_) => efi::BY_PROTOCOL,
+    fn into(self) -> efi::LocateSearchType {
+        match self {
+            HandleSearchType::AllHandle => efi::ALL_HANDLES,
+            HandleSearchType::ByRegisterNotify(_) => efi::BY_REGISTER_NOTIFY,
+            HandleSearchType::ByProtocol(_) => efi::BY_PROTOCOL,
+        }
     }
-  }
 }
 
 macro_rules! impl_protocol {
-  ($protocol_struct:ident, $protocol_type:ty, $guid:expr) => {
-    pub struct $protocol_struct;
-    unsafe impl Protocol for $protocol_struct {
-      type Interface = $protocol_type;
-      fn protocol_guid(&self) -> &'static efi::Guid {
-        &$guid
-      }
-    }
-    impl core::ops::Deref for $protocol_struct {
-      type Target = r_efi::efi::Guid;
-      fn deref(&self) -> &Self::Target {
-        &self.protocol_guid()
-      }
-    }
-  };
+    ($protocol_struct:ident, $protocol_type:ty, $guid:expr) => {
+        pub struct $protocol_struct;
+        unsafe impl Protocol for $protocol_struct {
+            type Interface = $protocol_type;
+            fn protocol_guid(&self) -> &'static efi::Guid {
+                &$guid
+            }
+        }
+        impl core::ops::Deref for $protocol_struct {
+            type Target = r_efi::efi::Guid;
+            fn deref(&self) -> &Self::Target {
+                &self.protocol_guid()
+            }
+        }
+    };
 }
 
 macro_rules! impl_r_efi_protocol {
-  ($protocol_struct:ident, $protocol:ident) => {
-    impl_protocol! {
-      $protocol_struct,
-      r_efi::efi::protocols::$protocol::Protocol,
-      r_efi::efi::protocols::$protocol::PROTOCOL_GUID
-    }
-  };
+    ($protocol_struct:ident, $protocol:ident) => {
+        impl_protocol! {
+          $protocol_struct,
+          r_efi::efi::protocols::$protocol::Protocol,
+          r_efi::efi::protocols::$protocol::PROTOCOL_GUID
+        }
+    };
 }
 
 impl_r_efi_protocol!(AbsolutePointer, absolute_pointer);
@@ -81,9 +81,9 @@ impl_r_efi_protocol!(LoadFile, load_file);
 impl_r_efi_protocol!(LoadFile2, load_file2);
 impl_r_efi_protocol!(LoadedImage, loaded_image);
 impl_protocol!(
-  LoadedImageDevicePath,
-  efi::protocols::loaded_image::Protocol,
-  efi::protocols::loaded_image_device_path::PROTOCOL_GUID
+    LoadedImageDevicePath,
+    efi::protocols::loaded_image::Protocol,
+    efi::protocols::loaded_image_device_path::PROTOCOL_GUID
 );
 impl_r_efi_protocol!(ManagedNetwork, managed_network);
 impl_r_efi_protocol!(MpService, mp_services);
