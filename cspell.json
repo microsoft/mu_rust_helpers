@@ -22,17 +22,21 @@
   ],
   "words": [
     "aarch",
+    "bitor",
+    "dereferenceable",
     "depex",
     "dxefv",
     "efiapi",
     "eficall",
     "GIGANTOR",
     "indoc",
+    "pointee",
     "rustc",
     "rustfmt",
     "uefi's",
     "uncacheable",
     "upvote",
+    "withf",
     "xffff"
   ]
 }
