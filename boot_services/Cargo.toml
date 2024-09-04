@@ -16,4 +16,4 @@ r-efi = { workspace = true }
 mockall = { version = "*", optional = true }
 
 [dev-dependencies]
-mockall = { version = "0.12.1" }
+mockall = { version = "0.13.0" }
