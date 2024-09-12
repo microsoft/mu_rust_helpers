@@ -1,10 +1,10 @@
 [package]
-name = "guid_helpers"
+name = "guid"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-path = "src/guid_helpers.rs"
+path = "src/guid.rs"
 
 [dependencies]
 r-efi = { workspace = true }

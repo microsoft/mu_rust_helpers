@@ -30,12 +30,12 @@ macro_rules! guid_to_uuid {
 
 const ZERO_GUID_STR: &str = "00000000-0000-0000-0000-000000000000";
 
-pub const ZERO_GUID: efi::Guid = guid!(ZERO_GUID_STR);
+pub const ZERO: efi::Guid = guid!(ZERO_GUID_STR);
 
 /// Rust equivalent to `gEfiCallerIdGuid` from AutoGen.c
 /// The EDK2 build system will populate the `FILE_GUID` environment variable with the module INF GUID.
 /// A zero-GUID is generated as a backup to support various test cases where the EDK2 build system is not present.
-pub const EFI_CALLER_ID_GUID: efi::Guid = guid!(match option_env!("FILE_GUID") {
+pub const CALLER_ID: efi::Guid = guid!(match option_env!("FILE_GUID") {
     Some(guid_str) => guid_str,
     None => ZERO_GUID_STR,
 });
@@ -45,7 +45,7 @@ mod tests {
     use r_efi::efi;
     use uuid::uuid;
 
-    use crate::{EFI_CALLER_ID_GUID, ZERO_GUID, ZERO_GUID_STR};
+    use crate::{CALLER_ID, ZERO, ZERO_GUID_STR};
 
     const MS_WHEA_RSC_DATA_TYPE_GUID_FROM_MACRO: efi::Guid = guid!("91DEEA05-8C0A-4DCD-B91E-F21CA0C68405");
     const ADVANCED_LOGGER_PROTOCOL_GUID_FROM_MACRO: efi::Guid = guid!("434F695C-EF26-4A12-9EBA-DDEF0097497C");
@@ -56,10 +56,10 @@ mod tests {
     fn test_guid_macro() {
         // `guid!` output is equivalent to `efi::Guid::from_fields()`
         assert_eq!(ADVANCED_LOGGER_PROTOCOL_GUID_FROM_MACRO, ADVANCED_LOGGER_PROTOCOL_GUID_FROM_FIELDS);
-        // `EFI_CALLER_ID_GUID` is a zero-GUID when `FILE_GUID` is undefined
-        assert_eq!(EFI_CALLER_ID_GUID, ZERO_GUID);
+        // `CALLER_ID` is a zero-GUID when `FILE_GUID` is undefined
+        assert_eq!(CALLER_ID, ZERO);
         // Zero-GUID is actually zeroes
-        assert_eq!(*ZERO_GUID.as_bytes(), [0u8; 16]);
+        assert_eq!(*ZERO.as_bytes(), [0u8; 16]);
         // `guid!` is generating different output for different input
         assert_ne!(ADVANCED_LOGGER_PROTOCOL_GUID_FROM_MACRO, MS_WHEA_RSC_DATA_TYPE_GUID_FROM_MACRO);
     }
