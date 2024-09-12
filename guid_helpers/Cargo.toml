@@ -1,0 +1,11 @@
+[package]
+name = "guid_helpers"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/guid_helpers.rs"
+
+[dependencies]
+r-efi = { workspace = true }
+uuid = { workspace = true }
