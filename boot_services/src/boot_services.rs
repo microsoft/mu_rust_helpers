@@ -1472,4 +1472,19 @@ mod test {
         let status = boot_services.allocate_pages(AllocType::Address(17), MemoryType::MEMORY_MAPPED_IO, 4);
         assert!(matches!(status, Ok(17)));
     }
+
+    #[test]
+    fn test_free_pages() {
+        let boot_services = boot_services!(free_pages = efi_free_pages);
+
+        extern "efiapi" fn efi_free_pages(address: efi::PhysicalAddress, nb_pages: usize) -> efi::Status {
+            assert_eq!(address, 0x100000);
+            assert_eq!(nb_pages, 10);
+
+            efi::Status::SUCCESS
+        }
+
+        let status = boot_services.free_pages(0x100000, 10);
+        assert!(matches!(status, Ok(())));
+    }
 }
