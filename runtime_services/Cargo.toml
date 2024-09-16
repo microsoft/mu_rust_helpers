@@ -1,0 +1,19 @@
+[package]
+name = "runtime_services"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/runtime_services.rs"
+
+[features]
+default = []
+global_allocator = []
+mockall = ["dep:mockall"]
+
+[dependencies]
+r-efi = { workspace = true }
+mockall = { version = "*", optional = true }
+
+[dev-dependencies]
+mockall = { version = "0.13.0" }
