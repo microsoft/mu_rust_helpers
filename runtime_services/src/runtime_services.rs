@@ -45,6 +45,13 @@ pub enum RuntimeServicesGetVariableStatus {
     Success { data_size: usize, attributes: u32 },
 }
 
+#[derive(Debug)]
+pub struct RuntimeServicesVariableInfo {
+    maximum_variable_storage_size: u64,
+    remaining_variable_storage_size: u64,
+    maximum_variable_size: u64,
+}
+
 impl<'a> StandardRuntimeServices<'a> {
     /// Create a new StandardRuntimeServices with the provided [efi::RuntimeServices].
     pub const fn new(efi_runtime_services: &'a efi::RuntimeServices) -> Self {
@@ -130,8 +137,6 @@ pub trait RuntimeServices: Sized {
             None => Vec::<u8>::new(),
         };
 
-        // Loop a maximum of two times: If the first iteration has a buffer that's too small
-        // run it again with a buffer size that matches the returned size
         let mut first_attempt = true;
         loop {
             unsafe {
@@ -186,6 +191,10 @@ pub trait RuntimeServices: Sized {
         unsafe { self.get_next_variable_name_unchecked(prev_name, prev_namespace) }
     }
 
+    unsafe fn query_variable_info(&self, attributes: u32) -> Result<RuntimeServicesVariableInfo, efi::Status> {
+        unsafe { self.query_variable_info_unchecked(attributes) }
+    }
+
     unsafe fn set_variable_unchecked(
         &self,
         name: &mut [u16],
@@ -206,6 +215,9 @@ pub trait RuntimeServices: Sized {
         prev_name: &[u16],
         prev_namespace: &efi::Guid,
     ) -> Result<(Vec<u16>, efi::Guid), efi::Status>;
+
+    unsafe fn query_variable_info_unchecked(&self, attributes: u32)
+        -> Result<RuntimeServicesVariableInfo, efi::Status>;
 }
 
 impl RuntimeServices for StandardRuntimeServices<'_> {
@@ -316,6 +328,35 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
                     return Ok((name, namespace));
                 }
             }
+        }
+    }
+
+    unsafe fn query_variable_info_unchecked(
+        &self,
+        attributes: u32,
+    ) -> Result<RuntimeServicesVariableInfo, efi::Status> {
+        let query_variable_info = self.efi_runtime_services().query_variable_info;
+        if query_variable_info as usize == 0 {
+            panic!("QueryVariableInfo has not initialized in the Runtime Services Table.")
+        }
+
+        let mut var_info = RuntimeServicesVariableInfo {
+            maximum_variable_storage_size: 0,
+            remaining_variable_storage_size: 0,
+            maximum_variable_size: 0,
+        };
+
+        let status = query_variable_info(
+            attributes,
+            ptr::addr_of_mut!(var_info.maximum_variable_storage_size),
+            ptr::addr_of_mut!(var_info.remaining_variable_storage_size),
+            ptr::addr_of_mut!(var_info.maximum_variable_size),
+        );
+
+        if status.is_error() {
+            return Err(status);
+        } else {
+            return Ok(var_info);
         }
     }
 }
