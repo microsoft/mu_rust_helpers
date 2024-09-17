@@ -20,7 +20,7 @@ use core::{
     mem::{self, MaybeUninit},
     ops::Index,
     option::Option,
-    panic, ptr, slice,
+    ptr, slice,
     sync::atomic::{AtomicPtr, Ordering},
 };
 use static_ptr::{StaticPtr, StaticPtrMut};
@@ -108,8 +108,9 @@ pub trait RuntimeServices: Sized {
         data: &mut T,
     ) -> Result<(), efi::Status>
     where
-        T: AsMut<[u8]>,
+        T: AsMut<[u8]> + 'static,
     {
+        // Ensure the name is null-terminated
         let mut name_vec = Vec::<u16>::with_capacity(name.len() + 1);
         name_vec.extend_from_slice(name);
         name_vec.push(0);
@@ -124,14 +125,15 @@ pub trait RuntimeServices: Sized {
         size_hint: Option<usize>,
     ) -> Result<(Option<T>, u32), efi::Status>
     where
-        T: TryFrom<Vec<u8>>,
+        T: TryFrom<Vec<u8>> + 'static,
     {
+        // Ensure the name is null-terminated
         let mut name_vec = Vec::<u16>::with_capacity(name.len() + 1);
         name_vec.extend_from_slice(name);
         name_vec.push(0);
 
-        // Note: We can't simply allocate an empty buffer of size T because we can't assume
-        //       T::try_from will be the same size as T
+        // We can't simply allocate an empty buffer of size T because we can't assume
+        // the TryFrom representation of T will be the same as T
         let mut data: Vec<u8> = match size_hint {
             Some(s) => Vec::<u8>::with_capacity(s),
             None => Vec::<u8>::new(),
@@ -166,6 +168,7 @@ pub trait RuntimeServices: Sized {
         name: &[u16],
         namespace: &efi::Guid,
     ) -> Result<(usize, u32), efi::Status> {
+        // Ensure the name is null-terminated
         let mut name_vec = Vec::<u16>::with_capacity(name.len() + 1);
         name_vec.extend_from_slice(name);
         name_vec.push(0);
@@ -203,11 +206,11 @@ pub trait RuntimeServices: Sized {
         data: &mut [u8],
     ) -> Result<(), efi::Status>;
 
-    unsafe fn get_variable_unchecked(
+    unsafe fn get_variable_unchecked<'a>(
         &self,
         name: &mut [u16],
         namespace: &efi::Guid,
-        data: Option<&mut [u8]>,
+        data: Option<&'a mut [u8]>,
     ) -> RuntimeServicesGetVariableStatus;
 
     unsafe fn get_next_variable_name_unchecked(
@@ -373,11 +376,11 @@ mod test {
       static RUNTIME_SERVICE: StandardRuntimeServices = StandardRuntimeServices::new_uninit();
       let efi_runtime_services = unsafe {
         #[allow(unused_mut)]
-        let mut bs = MaybeUninit::<efi::RuntimeServices>::zeroed();
+        let mut rs = MaybeUninit::<efi::RuntimeServices>::zeroed();
         $(
-          bs.assume_init_mut().$efi_services = $efi_service_fn;
+          rs.assume_init_mut().$efi_services = $efi_service_fn;
         )*
-        bs.assume_init()
+        rs.assume_init()
       };
       RUNTIME_SERVICE.initialize(&efi_runtime_services);
       &RUNTIME_SERVICE
@@ -387,8 +390,8 @@ mod test {
     #[test]
     #[should_panic(expected = "Runtime services is not initialized.")]
     fn test_that_accessing_uninit_runtime_services_should_panic() {
-        let bs = StandardRuntimeServices::new_uninit();
-        bs.efi_runtime_services();
+        let rs = StandardRuntimeServices::new_uninit();
+        rs.efi_runtime_services();
     }
 
     #[test]
