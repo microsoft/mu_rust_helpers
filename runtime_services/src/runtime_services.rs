@@ -37,6 +37,7 @@ pub struct StandardRuntimeServices<'a> {
     _lifetime_marker: PhantomData<&'a efi::RuntimeServices>,
 }
 
+#[derive(Debug)]
 pub enum RuntimeServicesGetVariableStatus {
     Error(efi::Status),
     BufferTooSmall { data_size: usize, attributes: u32 },
@@ -91,35 +92,41 @@ unsafe impl Send for StandardRuntimeServices<'static> {}
 
 #[cfg_attr(any(test, feature = "mockall"), automock)]
 pub trait RuntimeServices: Sized {
-    fn set_variable<T>(
-        &self,
-        namespace: &efi::Guid,
-        name: &str,
-        attributes: u32,
-        data: &mut T,
-    ) -> Result<(), efi::Status>
+    fn set_variable<T>(&self, name: &[u16], namespace: &efi::Guid, attributes: u32, data: T) -> Result<(), efi::Status>
     where
-        T: AsMut<[u8]>,
+        T: TryInto<Vec<u8>>,
     {
-        unsafe { self.set_variable_unchecked(name, namespace, attributes, data.as_mut()) }
+        let mut serialized_data: Vec<u8> = match data.try_into() {
+            Ok(d) => d,
+            Err(_) => return Err(efi::Status::INVALID_PARAMETER),
+        };
+
+        let mut name_vec = Vec::<u16>::with_capacity(name.len() + 1);
+        name_vec.extend_from_slice(name);
+        name_vec.push(0);
+
+        unsafe { self.set_variable_unchecked(name_vec.as_mut_slice(), namespace, attributes, serialized_data.as_mut()) }
     }
 
     fn get_variable<T>(
         &self,
-        name: &str,
+        name: &[u16],
         namespace: &efi::Guid,
         size_hint: Option<usize>,
     ) -> Result<(Option<T>, u32), efi::Status>
     where
         T: TryFrom<Vec<u8>>,
     {
-        // Note: We can't simply allocate an empty T because we can't assume
-        //       T::try_from will be the same size as T
+        let mut name_vec = Vec::<u16>::with_capacity(name.len() + 1);
+        name_vec.extend_from_slice(name);
+        name_vec.push(0);
 
+        // Note: We can't simply allocate an empty buffer of size T because we can't assume
+        //       T::try_from will be the same size as T
         let mut data: Vec<u8> = match size_hint {
             Some(s) => Vec::<u8>::with_capacity(s),
             None => {
-                let (size, _) = self.get_variable_size_and_attributes(name, namespace)?;
+                let (size, _) = self.get_variable_size_and_attributes(name_vec.as_slice(), namespace)?;
                 Vec::<u8>::with_capacity(size)
             }
         };
@@ -129,7 +136,7 @@ pub trait RuntimeServices: Sized {
         let mut allow_try_again = size_hint.is_some();
         loop {
             unsafe {
-                match self.get_variable_unchecked(name, namespace, Some(&mut data)) {
+                match self.get_variable_unchecked(name_vec.as_mut_slice(), namespace, Some(&mut data)) {
                     RuntimeServicesGetVariableStatus::Success { data_size, attributes } => match T::try_from(data) {
                         Ok(d) => return Ok((Some(d), attributes)),
                         Err(_) => return Err(efi::Status::INVALID_PARAMETER),
@@ -150,11 +157,13 @@ pub trait RuntimeServices: Sized {
         }
     }
 
-    fn get_variable_size_and_attributes(&self, name: &str, namespace: &efi::Guid) -> Result<(usize, u32), efi::Status> {
-        // Create a buffer the size T would be if in u8 form
+    fn get_variable_size_and_attributes(&self, name: &[u16], namespace: &efi::Guid) -> Result<(usize, u32), efi::Status> {
+        let mut name_vec = Vec::<u16>::with_capacity(name.len() + 1);
+        name_vec.extend_from_slice(name);
+        name_vec.push(0);
 
         unsafe {
-            match self.get_variable_unchecked(name, namespace, None) {
+            match self.get_variable_unchecked(name_vec.as_mut_slice(), namespace, None) {
                 RuntimeServicesGetVariableStatus::BufferTooSmall { data_size, attributes } => {
                     Ok((data_size, attributes))
                 }
@@ -168,7 +177,7 @@ pub trait RuntimeServices: Sized {
 
     unsafe fn set_variable_unchecked(
         &self,
-        name: &str,
+        name: &mut [u16],
         namespace: &efi::Guid,
         attributes: u32,
         data: &mut [u8],
@@ -176,7 +185,7 @@ pub trait RuntimeServices: Sized {
 
     unsafe fn get_variable_unchecked(
         &self,
-        name: &str,
+        name: &mut [u16],
         namespace: &efi::Guid,
         data: Option<&mut [u8]>,
     ) -> RuntimeServicesGetVariableStatus;
@@ -185,7 +194,7 @@ pub trait RuntimeServices: Sized {
 impl RuntimeServices for StandardRuntimeServices<'_> {
     unsafe fn set_variable_unchecked(
         &self,
-        name: &str,
+        name: &mut [u16],
         namespace: &efi::Guid,
         attributes: u32,
         data: &mut [u8],
@@ -196,7 +205,7 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
         }
 
         let status = set_variable(
-            name.encode_utf16().collect::<Vec<u16>>().as_mut_ptr(),
+            name.as_mut_ptr(),
             namespace as *const _ as *mut _,
             attributes,
             data.len(),
@@ -212,7 +221,7 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
 
     unsafe fn get_variable_unchecked(
         &self,
-        name: &str,
+        name: &mut [u16],
         namespace: &efi::Guid,
         data: Option<&mut [u8]>,
     ) -> RuntimeServicesGetVariableStatus {
@@ -228,7 +237,7 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
         let mut attributes: u32 = 0;
 
         let status = set_variable(
-            name.encode_utf16().collect::<Vec<u16>>().as_mut_ptr(),
+            name.as_mut_ptr(),
             namespace as *const _ as *mut _,
             ptr::addr_of_mut!(attributes),
             ptr::addr_of_mut!(data_size),
