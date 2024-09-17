@@ -14,7 +14,14 @@ use mockall::automock;
 
 use alloc::vec::Vec;
 use core::{
-    any::{Any, TypeId}, ffi::c_void, marker::PhantomData, mem::{self, MaybeUninit}, ops::Index, option::Option, panic, ptr, slice, sync::atomic::{AtomicPtr, Ordering}
+    any::{Any, TypeId},
+    ffi::c_void,
+    marker::PhantomData,
+    mem::{self, MaybeUninit},
+    ops::Index,
+    option::Option,
+    panic, ptr, slice,
+    sync::atomic::{AtomicPtr, Ordering},
 };
 use static_ptr::{StaticPtr, StaticPtrMut};
 
@@ -86,20 +93,21 @@ unsafe impl Send for StandardRuntimeServices<'static> {}
 
 #[cfg_attr(any(test, feature = "mockall"), automock)]
 pub trait RuntimeServices: Sized {
-    fn set_variable<T>(&self, name: &[u16], namespace: &efi::Guid, attributes: u32, data: T) -> Result<(), efi::Status>
+    fn set_variable<T>(
+        &self,
+        name: &[u16],
+        namespace: &efi::Guid,
+        attributes: u32,
+        data: &mut T,
+    ) -> Result<(), efi::Status>
     where
-        T: TryInto<Vec<u8>>,
+        T: AsMut<[u8]>,
     {
-        let mut serialized_data: Vec<u8> = match data.try_into() {
-            Ok(d) => d,
-            Err(_) => return Err(efi::Status::INVALID_PARAMETER),
-        };
-
         let mut name_vec = Vec::<u16>::with_capacity(name.len() + 1);
         name_vec.extend_from_slice(name);
         name_vec.push(0);
 
-        unsafe { self.set_variable_unchecked(name_vec.as_mut_slice(), namespace, attributes, serialized_data.as_mut()) }
+        unsafe { self.set_variable_unchecked(name_vec.as_mut_slice(), namespace, attributes, data.as_mut()) }
     }
 
     fn get_variable<T>(
@@ -119,7 +127,7 @@ pub trait RuntimeServices: Sized {
         //       T::try_from will be the same size as T
         let mut data: Vec<u8> = match size_hint {
             Some(s) => Vec::<u8>::with_capacity(s),
-            None => Vec::<u8>::new()
+            None => Vec::<u8>::new(),
         };
 
         // Loop a maximum of two times: If the first iteration has a buffer that's too small
@@ -148,7 +156,11 @@ pub trait RuntimeServices: Sized {
         }
     }
 
-    fn get_variable_size_and_attributes(&self, name: &[u16], namespace: &efi::Guid) -> Result<(usize, u32), efi::Status> {
+    fn get_variable_size_and_attributes(
+        &self,
+        name: &[u16],
+        namespace: &efi::Guid,
+    ) -> Result<(usize, u32), efi::Status> {
         let mut name_vec = Vec::<u16>::with_capacity(name.len() + 1);
         name_vec.extend_from_slice(name);
         name_vec.push(0);
@@ -171,9 +183,7 @@ pub trait RuntimeServices: Sized {
         prev_name: &[u16],
         prev_namespace: &efi::Guid,
     ) -> Result<(Vec<u16>, efi::Guid), efi::Status> {
-        unsafe {
-            self.get_next_variable_name_unchecked(prev_name, prev_namespace)
-        }
+        unsafe { self.get_next_variable_name_unchecked(prev_name, prev_namespace) }
     }
 
     unsafe fn set_variable_unchecked(
@@ -282,32 +292,29 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
 
         let mut first_try: bool = true;
         loop {
-            match get_next_variable_name(
-                ptr::addr_of_mut!(name_size),
-                name.as_mut_ptr(),
-                ptr::addr_of_mut!(namespace)
-            ) {
-              efi::Status::BUFFER_TOO_SMALL if first_try => {
-                first_try = false;
+            match get_next_variable_name(ptr::addr_of_mut!(name_size), name.as_mut_ptr(), ptr::addr_of_mut!(namespace))
+            {
+                efi::Status::BUFFER_TOO_SMALL if first_try => {
+                    first_try = false;
 
-                name.reserve(name_size - name.len());
+                    name.reserve(name_size - name.len());
 
-                // Reset fields which may have been overwritten
-                name_size = name.capacity();
+                    // Reset fields which may have been overwritten
+                    name_size = name.capacity();
 
-                name.clear();
-                name.extend_from_slice(prev_name);
-                name.push(0);
+                    name.clear();
+                    name.extend_from_slice(prev_name);
+                    name.push(0);
 
-                namespace = *prev_namespace;
-              },
-              e if e.is_error() => return Err(e),
-              _ => {
-                // Shorten name to include up to first null byte
-                name.truncate(name.iter().position(|&c| c == 0).unwrap() + 1);
+                    namespace = *prev_namespace;
+                }
+                e if e.is_error() => return Err(e),
+                _ => {
+                    // Shorten name to include up to first null byte
+                    name.truncate(name.iter().position(|&c| c == 0).unwrap() + 1);
 
-                return Ok((name, namespace))
-              }
+                    return Ok((name, namespace));
+                }
             }
         }
     }
