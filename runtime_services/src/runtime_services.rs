@@ -110,10 +110,13 @@ pub trait RuntimeServices: Sized {
     where
         T: AsMut<[u8]> + 'static,
     {
-        // Ensure the name is null-terminated
-        let mut name_vec = Vec::<u16>::with_capacity(name.len() + 1);
-        name_vec.extend_from_slice(name);
-        name_vec.push(0);
+        if !name.iter().position(|&c| c == 0).is_some() {
+            panic!("Name passed into set_variable is not null-terminated.");
+        }
+
+        // Keep a local copy of name to unburden the caller of having to pass in a mutable slice
+        let mut name_vec = Vec::<u16>::new();
+        name_vec.copy_from_slice(name);
 
         unsafe { self.set_variable_unchecked(name_vec.as_mut_slice(), namespace, attributes, data.as_mut()) }
     }
@@ -127,10 +130,13 @@ pub trait RuntimeServices: Sized {
     where
         T: TryFrom<Vec<u8>> + 'static,
     {
-        // Ensure the name is null-terminated
-        let mut name_vec = Vec::<u16>::with_capacity(name.len() + 1);
-        name_vec.extend_from_slice(name);
-        name_vec.push(0);
+        if !name.iter().position(|&c| c == 0).is_some() {
+            panic!("Name passed into set_variable is not null-terminated.");
+        }
+
+        // Keep a local copy of name to unburden the caller of having to pass in a mutable slice
+        let mut name_vec = Vec::<u16>::new();
+        name_vec.copy_from_slice(name);
 
         // We can't simply allocate an empty buffer of size T because we can't assume
         // the TryFrom representation of T will be the same as T
@@ -143,11 +149,11 @@ pub trait RuntimeServices: Sized {
         loop {
             unsafe {
                 match self.get_variable_unchecked(name_vec.as_mut_slice(), namespace, Some(&mut data)) {
-                    RuntimeServicesGetVariableStatus::Success { data_size, attributes } => match T::try_from(data) {
+                    RuntimeServicesGetVariableStatus::Success { data_size: _, attributes } => match T::try_from(data) {
                         Ok(d) => return Ok((Some(d), attributes)),
                         Err(_) => return Err(efi::Status::INVALID_PARAMETER),
                     },
-                    RuntimeServicesGetVariableStatus::BufferTooSmall { data_size, attributes } => {
+                    RuntimeServicesGetVariableStatus::BufferTooSmall { data_size, attributes: _ } => {
                         if first_attempt {
                             first_attempt = false;
                             data.reserve_exact(data_size - data.len())
@@ -155,7 +161,7 @@ pub trait RuntimeServices: Sized {
                             return Err(efi::Status::BUFFER_TOO_SMALL);
                         }
                     }
-                    RuntimeServicesGetVariableStatus::Error(e) => {
+                    RuntimeServicesGetVariableStatus::Error(_) => {
                         return Err(efi::Status::INVALID_PARAMETER);
                     }
                 }
@@ -168,10 +174,13 @@ pub trait RuntimeServices: Sized {
         name: &[u16],
         namespace: &efi::Guid,
     ) -> Result<(usize, u32), efi::Status> {
-        // Ensure the name is null-terminated
-        let mut name_vec = Vec::<u16>::with_capacity(name.len() + 1);
-        name_vec.extend_from_slice(name);
-        name_vec.push(0);
+        if !name.iter().position(|&c| c == 0).is_some() {
+            panic!("Name passed into set_variable is not null-terminated.");
+        }
+
+        // Keep a local copy of name to unburden the caller of having to pass in a mutable slice
+        let mut name_vec = Vec::<u16>::new();
+        name_vec.copy_from_slice(name);
 
         unsafe {
             match self.get_variable_unchecked(name_vec.as_mut_slice(), namespace, None) {
@@ -179,7 +188,7 @@ pub trait RuntimeServices: Sized {
                     Ok((data_size, attributes))
                 }
                 RuntimeServicesGetVariableStatus::Error(e) => Err(e),
-                RuntimeServicesGetVariableStatus::Success { data_size, attributes } => {
+                RuntimeServicesGetVariableStatus::Success { data_size: _, attributes: _ } => {
                     panic!("GetVariable call with zero-sized buffer returned Success.")
                 }
             }
@@ -275,7 +284,7 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
             ptr::addr_of_mut!(data_size),
             match data {
                 Some(mut d) => ptr::addr_of_mut!(d) as *mut c_void,
-                None => 0 as *mut c_void,
+                None => ptr::null_mut() as *mut c_void,
             },
         );
 
