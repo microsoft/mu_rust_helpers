@@ -161,8 +161,8 @@ pub trait RuntimeServices: Sized {
                             return Err(efi::Status::BUFFER_TOO_SMALL);
                         }
                     }
-                    RuntimeServicesGetVariableStatus::Error(_) => {
-                        return Err(efi::Status::INVALID_PARAMETER);
+                    RuntimeServicesGetVariableStatus::Error(e) => {
+                        return Err(e);
                     }
                 }
             }
