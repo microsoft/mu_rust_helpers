@@ -14,13 +14,7 @@ use mockall::automock;
 
 use alloc::vec::Vec;
 use core::{
-    any::{Any, TypeId},
-    ffi::c_void,
-    marker::PhantomData,
-    mem::{self, MaybeUninit},
-    option::Option,
-    panic, ptr, slice,
-    sync::atomic::{AtomicPtr, Ordering},
+    any::{Any, TypeId}, ffi::c_void, marker::PhantomData, mem::{self, MaybeUninit}, ops::Index, option::Option, panic, ptr, slice, sync::atomic::{AtomicPtr, Ordering}
 };
 use static_ptr::{StaticPtr, StaticPtrMut};
 
@@ -172,6 +166,16 @@ pub trait RuntimeServices: Sized {
         }
     }
 
+    fn get_next_variable_name(
+        &self,
+        prev_name: &[u16],
+        prev_namespace: &efi::Guid,
+    ) -> Result<(Vec<u16>, efi::Guid), efi::Status> {
+        unsafe {
+            self.get_next_variable_name_unchecked(prev_name, prev_namespace)
+        }
+    }
+
     unsafe fn set_variable_unchecked(
         &self,
         name: &mut [u16],
@@ -186,6 +190,12 @@ pub trait RuntimeServices: Sized {
         namespace: &efi::Guid,
         data: Option<&mut [u8]>,
     ) -> RuntimeServicesGetVariableStatus;
+
+    unsafe fn get_next_variable_name_unchecked(
+        &self,
+        prev_name: &[u16],
+        prev_namespace: &efi::Guid,
+    ) -> Result<(Vec<u16>, efi::Guid), efi::Status>;
 }
 
 impl RuntimeServices for StandardRuntimeServices<'_> {
@@ -251,6 +261,55 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
         }
 
         RuntimeServicesGetVariableStatus::Success { data_size: data_size, attributes: attributes }
+    }
+
+    unsafe fn get_next_variable_name_unchecked(
+        &self,
+        prev_name: &[u16],
+        prev_namespace: &efi::Guid,
+    ) -> Result<(Vec<u16>, efi::Guid), efi::Status> {
+        let get_next_variable_name = self.efi_runtime_services().get_next_variable_name;
+        if get_next_variable_name as usize == 0 {
+            panic!("GetNextVariableName has not initialized in the Runtime Services Table.")
+        }
+
+        let mut name = Vec::<u16>::with_capacity(prev_name.len() + 1);
+        name.extend_from_slice(prev_name);
+        name.push(0);
+
+        let mut name_size: usize = name.capacity();
+        let mut namespace: efi::Guid = *prev_namespace;
+
+        let mut first_try: bool = true;
+        loop {
+            match get_next_variable_name(
+                ptr::addr_of_mut!(name_size),
+                name.as_mut_ptr(),
+                ptr::addr_of_mut!(namespace)
+            ) {
+              efi::Status::BUFFER_TOO_SMALL if first_try => {
+                first_try = false;
+
+                name.reserve(name_size - name.len());
+
+                // Reset fields which may have been overwritten
+                name_size = name.capacity();
+
+                name.clear();
+                name.extend_from_slice(prev_name);
+                name.push(0);
+
+                namespace = *prev_namespace;
+              },
+              e if e.is_error() => return Err(e),
+              _ => {
+                // Shorten name to include up to first null byte
+                name.truncate(name.iter().position(|&c| c == 0).unwrap() + 1);
+
+                return Ok((name, namespace))
+              }
+            }
+        }
     }
 }
 
