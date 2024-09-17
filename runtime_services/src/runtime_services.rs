@@ -125,15 +125,12 @@ pub trait RuntimeServices: Sized {
         //       T::try_from will be the same size as T
         let mut data: Vec<u8> = match size_hint {
             Some(s) => Vec::<u8>::with_capacity(s),
-            None => {
-                let (size, _) = self.get_variable_size_and_attributes(name_vec.as_slice(), namespace)?;
-                Vec::<u8>::with_capacity(size)
-            }
+            None => Vec::<u8>::new()
         };
 
         // Loop a maximum of two times: If the first iteration has a buffer that's too small
         // run it again with a buffer size that matches the returned size
-        let mut allow_try_again = size_hint.is_some();
+        let mut first_attempt = true;
         loop {
             unsafe {
                 match self.get_variable_unchecked(name_vec.as_mut_slice(), namespace, Some(&mut data)) {
@@ -142,8 +139,8 @@ pub trait RuntimeServices: Sized {
                         Err(_) => return Err(efi::Status::INVALID_PARAMETER),
                     },
                     RuntimeServicesGetVariableStatus::BufferTooSmall { data_size, attributes } => {
-                        if allow_try_again {
-                            allow_try_again = false;
+                        if first_attempt {
+                            first_attempt = false;
                             data.reserve_exact(data_size - data.len())
                         } else {
                             return Err(efi::Status::BUFFER_TOO_SMALL);
