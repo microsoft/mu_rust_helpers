@@ -18,13 +18,14 @@ use core::{
     ffi::c_void,
     marker::PhantomData,
     mem::{self, MaybeUninit},
+    ops::Index,
     option::Option,
-    ptr,
+    ptr, slice,
     sync::atomic::{AtomicPtr, Ordering},
 };
 use static_ptr::{StaticPtr, StaticPtrMut};
 
-use r_efi::efi;
+use r_efi::{efi, protocols::pci_io::Attribute};
 
 use allocation::{AllocType, MemoryMap, MemoryType};
 use boxed::RuntimeServicesBox;
@@ -35,6 +36,20 @@ use boxed::RuntimeServicesBox;
 pub struct StandardRuntimeServices<'a> {
     efi_runtime_services: AtomicPtr<efi::RuntimeServices>,
     _lifetime_marker: PhantomData<&'a efi::RuntimeServices>,
+}
+
+#[derive(Debug)]
+pub enum RuntimeServicesGetVariableStatus {
+    Error(efi::Status),
+    BufferTooSmall { data_size: usize, attributes: u32 },
+    Success { data_size: usize, attributes: u32 },
+}
+
+#[derive(Debug)]
+pub struct RuntimeServicesVariableInfo {
+    maximum_variable_storage_size: u64,
+    remaining_variable_storage_size: u64,
+    maximum_variable_size: u64,
 }
 
 impl<'a> StandardRuntimeServices<'a> {
@@ -70,7 +85,10 @@ impl<'a> StandardRuntimeServices<'a> {
     fn efi_runtime_services(&self) -> &efi::RuntimeServices {
         // SAFETY: This pointer is assume to be a valid efi::RuntimeServices pointer since the only way to set it was via an efi::RuntimeServices reference.
         unsafe {
-            self.efi_runtime_services.load(Ordering::SeqCst).as_ref::<'a>().expect("Runtime services is not initialize.")
+            self.efi_runtime_services
+                .load(Ordering::SeqCst)
+                .as_ref::<'a>()
+                .expect("Runtime services is not initialize.")
         }
     }
 }
@@ -82,13 +100,277 @@ unsafe impl Send for StandardRuntimeServices<'static> {}
 
 #[cfg_attr(any(test, feature = "mockall"), automock)]
 pub trait RuntimeServices: Sized {
+    fn set_variable<T>(
+        &self,
+        name: &[u16],
+        namespace: &efi::Guid,
+        attributes: u32,
+        data: &mut T,
+    ) -> Result<(), efi::Status>
+    where
+        T: AsMut<[u8]> + 'static,
+    {
+        if !name.iter().position(|&c| c == 0).is_some() {
+            panic!("Name passed into set_variable is not null-terminated.");
+        }
 
+        // Keep a local copy of name to unburden the caller of having to pass in a mutable slice
+        let mut name_vec = Vec::<u16>::new();
+        name_vec.copy_from_slice(name);
+
+        unsafe { self.set_variable_unchecked(name_vec.as_mut_slice(), namespace, attributes, data.as_mut()) }
+    }
+
+    fn get_variable<T>(
+        &self,
+        name: &[u16],
+        namespace: &efi::Guid,
+        size_hint: Option<usize>,
+    ) -> Result<(Option<T>, u32), efi::Status>
+    where
+        T: TryFrom<Vec<u8>> + 'static,
+    {
+        if !name.iter().position(|&c| c == 0).is_some() {
+            panic!("Name passed into set_variable is not null-terminated.");
+        }
+
+        // Keep a local copy of name to unburden the caller of having to pass in a mutable slice
+        let mut name_vec = Vec::<u16>::new();
+        name_vec.copy_from_slice(name);
+
+        // We can't simply allocate an empty buffer of size T because we can't assume
+        // the TryFrom representation of T will be the same as T
+        let mut data: Vec<u8> = match size_hint {
+            Some(s) => Vec::<u8>::with_capacity(s),
+            None => Vec::<u8>::new(),
+        };
+
+        let mut first_attempt = true;
+        loop {
+            unsafe {
+                match self.get_variable_unchecked(name_vec.as_mut_slice(), namespace, Some(&mut data)) {
+                    RuntimeServicesGetVariableStatus::Success { data_size: _, attributes } => match T::try_from(data) {
+                        Ok(d) => return Ok((Some(d), attributes)),
+                        Err(_) => return Err(efi::Status::INVALID_PARAMETER),
+                    },
+                    RuntimeServicesGetVariableStatus::BufferTooSmall { data_size, attributes: _ } => {
+                        if first_attempt {
+                            first_attempt = false;
+                            data.reserve_exact(data_size - data.len())
+                        } else {
+                            return Err(efi::Status::BUFFER_TOO_SMALL);
+                        }
+                    }
+                    RuntimeServicesGetVariableStatus::Error(_) => {
+                        return Err(efi::Status::INVALID_PARAMETER);
+                    }
+                }
+            }
+        }
+    }
+
+    fn get_variable_size_and_attributes(
+        &self,
+        name: &[u16],
+        namespace: &efi::Guid,
+    ) -> Result<(usize, u32), efi::Status> {
+        if !name.iter().position(|&c| c == 0).is_some() {
+            panic!("Name passed into set_variable is not null-terminated.");
+        }
+
+        // Keep a local copy of name to unburden the caller of having to pass in a mutable slice
+        let mut name_vec = Vec::<u16>::new();
+        name_vec.copy_from_slice(name);
+
+        unsafe {
+            match self.get_variable_unchecked(name_vec.as_mut_slice(), namespace, None) {
+                RuntimeServicesGetVariableStatus::BufferTooSmall { data_size, attributes } => {
+                    Ok((data_size, attributes))
+                }
+                RuntimeServicesGetVariableStatus::Error(e) => Err(e),
+                RuntimeServicesGetVariableStatus::Success { data_size: _, attributes: _ } => {
+                    panic!("GetVariable call with zero-sized buffer returned Success.")
+                }
+            }
+        }
+    }
+
+    fn get_next_variable_name(
+        &self,
+        prev_name: &[u16],
+        prev_namespace: &efi::Guid,
+    ) -> Result<(Vec<u16>, efi::Guid), efi::Status> {
+        unsafe { self.get_next_variable_name_unchecked(prev_name, prev_namespace) }
+    }
+
+    unsafe fn query_variable_info(&self, attributes: u32) -> Result<RuntimeServicesVariableInfo, efi::Status> {
+        unsafe { self.query_variable_info_unchecked(attributes) }
+    }
+
+    unsafe fn set_variable_unchecked(
+        &self,
+        name: &mut [u16],
+        namespace: &efi::Guid,
+        attributes: u32,
+        data: &mut [u8],
+    ) -> Result<(), efi::Status>;
+
+    unsafe fn get_variable_unchecked<'a>(
+        &self,
+        name: &mut [u16],
+        namespace: &efi::Guid,
+        data: Option<&'a mut [u8]>,
+    ) -> RuntimeServicesGetVariableStatus;
+
+    unsafe fn get_next_variable_name_unchecked(
+        &self,
+        prev_name: &[u16],
+        prev_namespace: &efi::Guid,
+    ) -> Result<(Vec<u16>, efi::Guid), efi::Status>;
+
+    unsafe fn query_variable_info_unchecked(&self, attributes: u32)
+        -> Result<RuntimeServicesVariableInfo, efi::Status>;
 }
 
 impl RuntimeServices for StandardRuntimeServices<'_> {
+    unsafe fn set_variable_unchecked(
+        &self,
+        name: &mut [u16],
+        namespace: &efi::Guid,
+        attributes: u32,
+        data: &mut [u8],
+    ) -> Result<(), efi::Status> {
+        let set_variable = self.efi_runtime_services().set_variable;
+        if set_variable as usize == 0 {
+            panic!("SetVariable has not initialized in the Runtime Services Table.")
+        }
 
+        let status = set_variable(
+            name.as_mut_ptr(),
+            namespace as *const _ as *mut _,
+            attributes,
+            data.len(),
+            data.as_mut_ptr() as *mut c_void,
+        );
 
+        if status.is_error() {
+            Err(status)
+        } else {
+            Ok(())
+        }
+    }
 
+    unsafe fn get_variable_unchecked(
+        &self,
+        name: &mut [u16],
+        namespace: &efi::Guid,
+        data: Option<&mut [u8]>,
+    ) -> RuntimeServicesGetVariableStatus {
+        let set_variable = self.efi_runtime_services().get_variable;
+        if set_variable as usize == 0 {
+            panic!("GetVariable has not initialized in the Runtime Services Table.")
+        }
+
+        let mut data_size: usize = match data {
+            Some(ref d) => d.len(),
+            None => 0,
+        };
+        let mut attributes: u32 = 0;
+
+        let status = set_variable(
+            name.as_mut_ptr(),
+            namespace as *const _ as *mut _,
+            ptr::addr_of_mut!(attributes),
+            ptr::addr_of_mut!(data_size),
+            match data {
+                Some(mut d) => ptr::addr_of_mut!(d) as *mut c_void,
+                None => ptr::null_mut() as *mut c_void,
+            },
+        );
+
+        if status == efi::Status::BUFFER_TOO_SMALL {
+            return RuntimeServicesGetVariableStatus::BufferTooSmall { data_size: data_size, attributes: attributes };
+        } else if status.is_error() {
+            return RuntimeServicesGetVariableStatus::Error(status);
+        }
+
+        RuntimeServicesGetVariableStatus::Success { data_size: data_size, attributes: attributes }
+    }
+
+    unsafe fn get_next_variable_name_unchecked(
+        &self,
+        prev_name: &[u16],
+        prev_namespace: &efi::Guid,
+    ) -> Result<(Vec<u16>, efi::Guid), efi::Status> {
+        let get_next_variable_name = self.efi_runtime_services().get_next_variable_name;
+        if get_next_variable_name as usize == 0 {
+            panic!("GetNextVariableName has not initialized in the Runtime Services Table.")
+        }
+
+        let mut name = Vec::<u16>::with_capacity(prev_name.len() + 1);
+        name.extend_from_slice(prev_name);
+        name.push(0);
+
+        let mut name_size: usize = name.capacity();
+        let mut namespace: efi::Guid = *prev_namespace;
+
+        let mut first_try: bool = true;
+        loop {
+            match get_next_variable_name(ptr::addr_of_mut!(name_size), name.as_mut_ptr(), ptr::addr_of_mut!(namespace))
+            {
+                efi::Status::BUFFER_TOO_SMALL if first_try => {
+                    first_try = false;
+
+                    name.reserve(name_size - name.len());
+
+                    // Reset fields which may have been overwritten
+                    name_size = name.capacity();
+
+                    name.clear();
+                    name.extend_from_slice(prev_name);
+                    name.push(0);
+
+                    namespace = *prev_namespace;
+                }
+                e if e.is_error() => return Err(e),
+                _ => {
+                    // Shorten name to include up to first null byte
+                    name.truncate(name.iter().position(|&c| c == 0).unwrap() + 1);
+
+                    return Ok((name, namespace));
+                }
+            }
+        }
+    }
+
+    unsafe fn query_variable_info_unchecked(
+        &self,
+        attributes: u32,
+    ) -> Result<RuntimeServicesVariableInfo, efi::Status> {
+        let query_variable_info = self.efi_runtime_services().query_variable_info;
+        if query_variable_info as usize == 0 {
+            panic!("QueryVariableInfo has not initialized in the Runtime Services Table.")
+        }
+
+        let mut var_info = RuntimeServicesVariableInfo {
+            maximum_variable_storage_size: 0,
+            remaining_variable_storage_size: 0,
+            maximum_variable_size: 0,
+        };
+
+        let status = query_variable_info(
+            attributes,
+            ptr::addr_of_mut!(var_info.maximum_variable_storage_size),
+            ptr::addr_of_mut!(var_info.remaining_variable_storage_size),
+            ptr::addr_of_mut!(var_info.maximum_variable_size),
+        );
+
+        if status.is_error() {
+            return Err(status);
+        } else {
+            return Ok(var_info);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -103,11 +385,11 @@ mod test {
       static RUNTIME_SERVICE: StandardRuntimeServices = StandardRuntimeServices::new_uninit();
       let efi_runtime_services = unsafe {
         #[allow(unused_mut)]
-        let mut bs = MaybeUninit::<efi::RuntimeServices>::zeroed();
+        let mut rs = MaybeUninit::<efi::RuntimeServices>::zeroed();
         $(
-          bs.assume_init_mut().$efi_services = $efi_service_fn;
+          rs.assume_init_mut().$efi_services = $efi_service_fn;
         )*
-        bs.assume_init()
+        rs.assume_init()
       };
       RUNTIME_SERVICE.initialize(&efi_runtime_services);
       &RUNTIME_SERVICE
@@ -117,17 +399,16 @@ mod test {
     #[test]
     #[should_panic(expected = "Runtime services is not initialized.")]
     fn test_that_accessing_uninit_runtime_services_should_panic() {
-        let bs = StandardRuntimeServices::new_uninit();
-        bs.efi_runtime_services();
+        let rs = StandardRuntimeServices::new_uninit();
+        rs.efi_runtime_services();
     }
 
     #[test]
     #[should_panic(expected = "Runtime services is already initialized.")]
     fn test_that_initializing_runtime_services_multiple_time_should_panic() {
-        let efi_bs = unsafe { MaybeUninit::<efi::RuntimeServices>::zeroed().as_ptr().as_ref().unwrap() };
-        let bs = StandardRuntimeServices::new_uninit();
-        bs.initialize(efi_bs);
-        bs.initialize(efi_bs);
+        let efi_rs = unsafe { MaybeUninit::<efi::RuntimeServices>::zeroed().as_ptr().as_ref().unwrap() };
+        let rs = StandardRuntimeServices::new_uninit();
+        rs.initialize(efi_rs);
+        rs.initialize(efi_rs);
     }
-
 }
