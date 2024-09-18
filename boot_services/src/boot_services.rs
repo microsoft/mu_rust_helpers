@@ -1507,4 +1507,26 @@ mod test {
         let status = boot_services.allocate_pool(MemoryType::MEMORY_MAPPED_IO, 10);
         assert_eq!(status, Ok(0x55AA as *mut u8));
     }
+
+    #[test]
+    fn test_free_pool() {
+        let boot_services = boot_services!(free_pool = efi_free_pool);
+
+        extern "efiapi" fn efi_free_pool(buffer: *mut c_void) -> efi::Status {
+            if buffer.is_null() {
+                return efi::Status::INVALID_PARAMETER;
+            } else {
+                assert_eq!(buffer, 0xffff0000 as *mut u8 as *mut c_void);
+                return efi::Status::SUCCESS;
+            }
+        }
+
+        // positive test
+        let status = boot_services.free_pool(0xffff0000 as *mut u8);
+        assert_eq!(status, Ok(()));
+
+        // negative test
+        let status = boot_services.free_pool(ptr::null_mut());
+        assert_eq!(status, Err(efi::Status::INVALID_PARAMETER));
+    }
 }
