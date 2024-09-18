@@ -1,34 +1,22 @@
 #![cfg_attr(all(not(test), not(feature = "mockall")), no_std)]
 
-#[cfg(feature = "global_allocator")]
-pub mod global_allocator;
-
 extern crate alloc;
 
-pub mod allocation;
-pub mod boxed;
-pub mod static_ptr;
+pub mod variable_services;
 
 #[cfg(any(test, feature = "mockall"))]
 use mockall::automock;
 
 use alloc::vec::Vec;
 use core::{
-    any::{Any, TypeId},
     ffi::c_void,
     marker::PhantomData,
-    mem::{self, MaybeUninit},
-    ops::Index,
-    option::Option,
-    ptr, slice,
+    ptr,
     sync::atomic::{AtomicPtr, Ordering},
 };
-use static_ptr::{StaticPtr, StaticPtrMut};
 
-use r_efi::{efi, protocols::pci_io::Attribute};
-
-use allocation::{AllocType, MemoryMap, MemoryType};
-use boxed::RuntimeServicesBox;
+use variable_services::{GetVariableStatus, VariableInfo};
+use r_efi::efi;
 
 /// This is the runtime services used in the UEFI.
 /// it wraps an atomic ptr to [`efi::RuntimeServices`]
@@ -36,20 +24,6 @@ use boxed::RuntimeServicesBox;
 pub struct StandardRuntimeServices<'a> {
     efi_runtime_services: AtomicPtr<efi::RuntimeServices>,
     _lifetime_marker: PhantomData<&'a efi::RuntimeServices>,
-}
-
-#[derive(Debug)]
-pub enum RuntimeServicesGetVariableStatus {
-    Error(efi::Status),
-    BufferTooSmall { data_size: usize, attributes: u32 },
-    Success { data_size: usize, attributes: u32 },
-}
-
-#[derive(Debug)]
-pub struct RuntimeServicesVariableInfo {
-    maximum_variable_storage_size: u64,
-    remaining_variable_storage_size: u64,
-    maximum_variable_size: u64,
 }
 
 impl<'a> StandardRuntimeServices<'a> {
@@ -149,11 +123,11 @@ pub trait RuntimeServices: Sized {
         loop {
             unsafe {
                 match self.get_variable_unchecked(name_vec.as_mut_slice(), namespace, Some(&mut data)) {
-                    RuntimeServicesGetVariableStatus::Success { data_size: _, attributes } => match T::try_from(data) {
+                    GetVariableStatus::Success { data_size: _, attributes } => match T::try_from(data) {
                         Ok(d) => return Ok((Some(d), attributes)),
                         Err(_) => return Err(efi::Status::INVALID_PARAMETER),
                     },
-                    RuntimeServicesGetVariableStatus::BufferTooSmall { data_size, attributes: _ } => {
+                    GetVariableStatus::BufferTooSmall { data_size, attributes: _ } => {
                         if first_attempt {
                             first_attempt = false;
                             data.reserve_exact(data_size - data.len())
@@ -161,7 +135,7 @@ pub trait RuntimeServices: Sized {
                             return Err(efi::Status::BUFFER_TOO_SMALL);
                         }
                     }
-                    RuntimeServicesGetVariableStatus::Error(e) => {
+                    GetVariableStatus::Error(e) => {
                         return Err(e);
                     }
                 }
@@ -184,11 +158,11 @@ pub trait RuntimeServices: Sized {
 
         unsafe {
             match self.get_variable_unchecked(name_vec.as_mut_slice(), namespace, None) {
-                RuntimeServicesGetVariableStatus::BufferTooSmall { data_size, attributes } => {
+                GetVariableStatus::BufferTooSmall { data_size, attributes } => {
                     Ok((data_size, attributes))
                 }
-                RuntimeServicesGetVariableStatus::Error(e) => Err(e),
-                RuntimeServicesGetVariableStatus::Success { data_size: _, attributes: _ } => {
+                GetVariableStatus::Error(e) => Err(e),
+                GetVariableStatus::Success { data_size: _, attributes: _ } => {
                     panic!("GetVariable call with zero-sized buffer returned Success.")
                 }
             }
@@ -203,7 +177,7 @@ pub trait RuntimeServices: Sized {
         unsafe { self.get_next_variable_name_unchecked(prev_name, prev_namespace) }
     }
 
-    unsafe fn query_variable_info(&self, attributes: u32) -> Result<RuntimeServicesVariableInfo, efi::Status> {
+    unsafe fn query_variable_info(&self, attributes: u32) -> Result<VariableInfo, efi::Status> {
         unsafe { self.query_variable_info_unchecked(attributes) }
     }
 
@@ -220,7 +194,7 @@ pub trait RuntimeServices: Sized {
         name: &mut [u16],
         namespace: &efi::Guid,
         data: Option<&'a mut [u8]>,
-    ) -> RuntimeServicesGetVariableStatus;
+    ) -> GetVariableStatus;
 
     unsafe fn get_next_variable_name_unchecked(
         &self,
@@ -229,7 +203,7 @@ pub trait RuntimeServices: Sized {
     ) -> Result<(Vec<u16>, efi::Guid), efi::Status>;
 
     unsafe fn query_variable_info_unchecked(&self, attributes: u32)
-        -> Result<RuntimeServicesVariableInfo, efi::Status>;
+        -> Result<VariableInfo, efi::Status>;
 }
 
 impl RuntimeServices for StandardRuntimeServices<'_> {
@@ -265,7 +239,7 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
         name: &mut [u16],
         namespace: &efi::Guid,
         data: Option<&mut [u8]>,
-    ) -> RuntimeServicesGetVariableStatus {
+    ) -> GetVariableStatus {
         let set_variable = self.efi_runtime_services().get_variable;
         if set_variable as usize == 0 {
             panic!("GetVariable has not initialized in the Runtime Services Table.")
@@ -289,12 +263,12 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
         );
 
         if status == efi::Status::BUFFER_TOO_SMALL {
-            return RuntimeServicesGetVariableStatus::BufferTooSmall { data_size: data_size, attributes: attributes };
+            return GetVariableStatus::BufferTooSmall { data_size: data_size, attributes: attributes };
         } else if status.is_error() {
-            return RuntimeServicesGetVariableStatus::Error(status);
+            return GetVariableStatus::Error(status);
         }
 
-        RuntimeServicesGetVariableStatus::Success { data_size: data_size, attributes: attributes }
+        GetVariableStatus::Success { data_size: data_size, attributes: attributes }
     }
 
     unsafe fn get_next_variable_name_unchecked(
@@ -346,13 +320,13 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
     unsafe fn query_variable_info_unchecked(
         &self,
         attributes: u32,
-    ) -> Result<RuntimeServicesVariableInfo, efi::Status> {
+    ) -> Result<VariableInfo, efi::Status> {
         let query_variable_info = self.efi_runtime_services().query_variable_info;
         if query_variable_info as usize == 0 {
             panic!("QueryVariableInfo has not initialized in the Runtime Services Table.")
         }
 
-        let mut var_info = RuntimeServicesVariableInfo {
+        let mut var_info = VariableInfo {
             maximum_variable_storage_size: 0,
             remaining_variable_storage_size: 0,
             maximum_variable_size: 0,
@@ -378,7 +352,7 @@ mod test {
     use efi;
 
     use super::*;
-    use core::{mem::MaybeUninit, sync::atomic::AtomicUsize};
+    use core::mem;
 
     macro_rules! runtime_services {
     ($($efi_services:ident = $efi_service_fn:ident),*) => {{
@@ -406,7 +380,7 @@ mod test {
     #[test]
     #[should_panic(expected = "Runtime services is already initialized.")]
     fn test_that_initializing_runtime_services_multiple_time_should_panic() {
-        let efi_rs = unsafe { MaybeUninit::<efi::RuntimeServices>::zeroed().as_ptr().as_ref().unwrap() };
+        let efi_rs = unsafe { mem::MaybeUninit::<efi::RuntimeServices>::zeroed().as_ptr().as_ref().unwrap() };
         let rs = StandardRuntimeServices::new_uninit();
         rs.initialize(efi_rs);
         rs.initialize(efi_rs);
