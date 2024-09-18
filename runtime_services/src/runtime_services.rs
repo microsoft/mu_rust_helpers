@@ -15,8 +15,8 @@ use core::{
     sync::atomic::{AtomicPtr, Ordering},
 };
 
-use variable_services::{GetVariableStatus, VariableInfo};
 use r_efi::efi;
+use variable_services::{GetVariableStatus, VariableInfo};
 
 /// This is the runtime services used in the UEFI.
 /// it wraps an atomic ptr to [`efi::RuntimeServices`]
@@ -50,7 +50,7 @@ impl<'a> StandardRuntimeServices<'a> {
             // The efi::RuntimeServices is only read, that is why we use a non mutable reference.
             self.efi_runtime_services.store(efi_runtime_services as *const _ as *mut _, Ordering::SeqCst)
         } else {
-            panic!("Runtime services is already initialize.")
+            panic!("Runtime services is already initialized.")
         }
     }
 
@@ -62,7 +62,7 @@ impl<'a> StandardRuntimeServices<'a> {
             self.efi_runtime_services
                 .load(Ordering::SeqCst)
                 .as_ref::<'a>()
-                .expect("Runtime services is not initialize.")
+                .expect("Runtime services is not initialized.")
         }
     }
 }
@@ -89,8 +89,7 @@ pub trait RuntimeServices: Sized {
         }
 
         // Keep a local copy of name to unburden the caller of having to pass in a mutable slice
-        let mut name_vec = Vec::<u16>::new();
-        name_vec.copy_from_slice(name);
+        let mut name_vec = name.to_vec();
 
         unsafe { self.set_variable_unchecked(name_vec.as_mut_slice(), namespace, attributes, data.as_mut()) }
     }
@@ -100,7 +99,7 @@ pub trait RuntimeServices: Sized {
         name: &[u16],
         namespace: &efi::Guid,
         size_hint: Option<usize>,
-    ) -> Result<(Option<T>, u32), efi::Status>
+    ) -> Result<(T, u32), efi::Status>
     where
         T: TryFrom<Vec<u8>> + 'static,
     {
@@ -109,28 +108,33 @@ pub trait RuntimeServices: Sized {
         }
 
         // Keep a local copy of name to unburden the caller of having to pass in a mutable slice
-        let mut name_vec = Vec::<u16>::new();
-        name_vec.copy_from_slice(name);
+        let mut name_vec = name.to_vec();
 
         // We can't simply allocate an empty buffer of size T because we can't assume
         // the TryFrom representation of T will be the same as T
-        let mut data: Vec<u8> = match size_hint {
-            Some(s) => Vec::<u8>::with_capacity(s),
-            None => Vec::<u8>::new(),
-        };
+        let mut data = Vec::<u8>::new();
+        if size_hint.is_some() {
+            data.resize(size_hint.unwrap(), 0);
+        }
 
         let mut first_attempt = true;
         loop {
             unsafe {
-                match self.get_variable_unchecked(name_vec.as_mut_slice(), namespace, Some(&mut data)) {
+                let status = self.get_variable_unchecked(
+                    name_vec.as_mut_slice(),
+                    namespace,
+                    if data.len() == 0 { None } else { Some(&mut data) },
+                );
+
+                match status {
                     GetVariableStatus::Success { data_size: _, attributes } => match T::try_from(data) {
-                        Ok(d) => return Ok((Some(d), attributes)),
+                        Ok(d) => return Ok((d, attributes)),
                         Err(_) => return Err(efi::Status::INVALID_PARAMETER),
                     },
                     GetVariableStatus::BufferTooSmall { data_size, attributes: _ } => {
                         if first_attempt {
                             first_attempt = false;
-                            data.reserve_exact(data_size - data.len())
+                            data.resize(data_size, 10);
                         } else {
                             return Err(efi::Status::BUFFER_TOO_SMALL);
                         }
@@ -153,14 +157,11 @@ pub trait RuntimeServices: Sized {
         }
 
         // Keep a local copy of name to unburden the caller of having to pass in a mutable slice
-        let mut name_vec = Vec::<u16>::new();
-        name_vec.copy_from_slice(name);
+        let mut name_vec = name.to_vec();
 
         unsafe {
             match self.get_variable_unchecked(name_vec.as_mut_slice(), namespace, None) {
-                GetVariableStatus::BufferTooSmall { data_size, attributes } => {
-                    Ok((data_size, attributes))
-                }
+                GetVariableStatus::BufferTooSmall { data_size, attributes } => Ok((data_size, attributes)),
                 GetVariableStatus::Error(e) => Err(e),
                 GetVariableStatus::Success { data_size: _, attributes: _ } => {
                     panic!("GetVariable call with zero-sized buffer returned Success.")
@@ -202,8 +203,7 @@ pub trait RuntimeServices: Sized {
         prev_namespace: &efi::Guid,
     ) -> Result<(Vec<u16>, efi::Guid), efi::Status>;
 
-    unsafe fn query_variable_info_unchecked(&self, attributes: u32)
-        -> Result<VariableInfo, efi::Status>;
+    unsafe fn query_variable_info_unchecked(&self, attributes: u32) -> Result<VariableInfo, efi::Status>;
 }
 
 impl RuntimeServices for StandardRuntimeServices<'_> {
@@ -240,8 +240,8 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
         namespace: &efi::Guid,
         data: Option<&mut [u8]>,
     ) -> GetVariableStatus {
-        let set_variable = self.efi_runtime_services().get_variable;
-        if set_variable as usize == 0 {
+        let get_variable = self.efi_runtime_services().get_variable;
+        if get_variable as usize == 0 {
             panic!("GetVariable has not initialized in the Runtime Services Table.")
         }
 
@@ -251,13 +251,13 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
         };
         let mut attributes: u32 = 0;
 
-        let status = set_variable(
+        let status = get_variable(
             name.as_mut_ptr(),
             namespace as *const _ as *mut _,
             ptr::addr_of_mut!(attributes),
             ptr::addr_of_mut!(data_size),
             match data {
-                Some(mut d) => ptr::addr_of_mut!(d) as *mut c_void,
+                Some(d) => d.as_ptr() as *mut c_void,
                 None => ptr::null_mut() as *mut c_void,
             },
         );
@@ -281,11 +281,13 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
             panic!("GetNextVariableName has not initialized in the Runtime Services Table.")
         }
 
-        let mut name = Vec::<u16>::with_capacity(prev_name.len() + 1);
-        name.extend_from_slice(prev_name);
-        name.push(0);
+        if !prev_name.iter().position(|&c| c == 0).is_some() {
+            panic!("Name passed into get_next_variable_name is not null-terminated.");
+        }
 
-        let mut name_size: usize = name.capacity();
+        let mut name = prev_name.to_vec();
+
+        let mut name_size: usize = name.len();
         let mut namespace: efi::Guid = *prev_namespace;
 
         let mut first_try: bool = true;
@@ -298,11 +300,10 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
                     name.reserve(name_size - name.len());
 
                     // Reset fields which may have been overwritten
-                    name_size = name.capacity();
+                    name_size = name.len();
 
                     name.clear();
                     name.extend_from_slice(prev_name);
-                    name.push(0);
 
                     namespace = *prev_namespace;
                 }
@@ -317,10 +318,7 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
         }
     }
 
-    unsafe fn query_variable_info_unchecked(
-        &self,
-        attributes: u32,
-    ) -> Result<VariableInfo, efi::Status> {
+    unsafe fn query_variable_info_unchecked(&self, attributes: u32) -> Result<VariableInfo, efi::Status> {
         let query_variable_info = self.efi_runtime_services().query_variable_info;
         if query_variable_info as usize == 0 {
             panic!("QueryVariableInfo has not initialized in the Runtime Services Table.")
@@ -352,14 +350,14 @@ mod test {
     use efi;
 
     use super::*;
-    use core::mem;
+    use core::{mem, slice};
 
     macro_rules! runtime_services {
     ($($efi_services:ident = $efi_service_fn:ident),*) => {{
       static RUNTIME_SERVICE: StandardRuntimeServices = StandardRuntimeServices::new_uninit();
       let efi_runtime_services = unsafe {
         #[allow(unused_mut)]
-        let mut rs = MaybeUninit::<efi::RuntimeServices>::zeroed();
+        let mut rs = mem::MaybeUninit::<efi::RuntimeServices>::zeroed();
         $(
           rs.assume_init_mut().$efi_services = $efi_service_fn;
         )*
