@@ -262,19 +262,51 @@ pub trait BootServices: Sized {
         nb_pages: usize,
     ) -> Result<usize, efi::Status>;
 
+    /// Frees memory pages.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-freepages" target="_blank">
+    /// 7.2.2. EFI_BOOT_SERVICES.FreePages()
+    /// </a>
     fn free_pages(&self, address: usize, nb_pages: usize) -> Result<(), efi::Status>;
 
+    /// Returns the current memory map.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-getmemorymap" target="_blank">
+    /// 7.2.3. EFI_BOOT_SERVICES.GetMemoryMap()
+    /// </a>
     fn get_memory_map<'a>(&'a self) -> Result<MemoryMap<'a, Self>, (efi::Status, usize)>;
 
+    /// Allocates pool memory.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-allocatepool" target="_blank">
+    /// 7.2.4. EFI_BOOT_SERVICES.AllocatePool()
+    /// </a>
     fn allocate_pool(&self, pool_type: MemoryType, size: usize) -> Result<*mut u8, efi::Status>;
 
+    /// Allocates pool memory casted as given type.
     fn allocate_pool_for_type<T: 'static>(&self, pool_type: MemoryType) -> Result<*mut T, efi::Status> {
         let ptr = self.allocate_pool(pool_type, mem::size_of::<T>())?;
         Ok(ptr as *mut T)
     }
 
+    /// Returns pool memory to the system.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-freepool" target="_blank">
+    /// 7.2.5. EFI_BOOT_SERVICES.FreePool()
+    /// </a>
     fn free_pool(&self, buffer: *mut u8) -> Result<(), efi::Status>;
 
+    /// Installs a protocol interface on a device handle.
+    /// If the handle does not exist, it is created and added to the list of handles in the system.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-installprotocolinterface" target="_blank">
+    /// 7.3.2. EFI_BOOT_SERVICES.InstallProtocolInterface()
+    /// </a>
     fn install_protocol_interface<P: Protocol<Interface = I> + 'static, I: Any + 'static>(
         &self,
         handle: Option<efi::Handle>,
@@ -289,6 +321,12 @@ pub trait BootServices: Sized {
         unsafe { self.install_protocol_interface_unchecked(handle, protocol.protocol_guid(), interface_ptr) }
     }
 
+    /// Prefer normal [`BootServices::install_protocol_interface`] when possible.
+    ///
+    /// # Safety
+    ///
+    /// When calling this method, you have to make sure that if *interface* pointer is non-null, it is adhereing to
+    /// the structure associated with the protocol.  
     unsafe fn install_protocol_interface_unchecked(
         &self,
         handle: Option<efi::Handle>,
@@ -296,6 +334,12 @@ pub trait BootServices: Sized {
         interface: *mut c_void,
     ) -> Result<efi::Handle, efi::Status>;
 
+    /// Removes a protocol interface from a device handle.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-uninstallprotocolinterface" target="_blank">
+    /// 7.3.3. EFI_BOOT_SERVICES.UninstallProtocolInterface()
+    /// </a>
     fn uninstall_protocol_interface<P: Protocol<Interface = I> + 'static, I: Any + 'static>(
         &self,
         handle: efi::Handle,
@@ -310,6 +354,10 @@ pub trait BootServices: Sized {
         unsafe { self.uninstall_protocol_interface_unchecked(handle, protocol.protocol_guid(), interface_ptr) }
     }
 
+    /// Prefer normal [`BootServices::uninstall_protocol_interface`] when possible.
+    ///
+    /// # Safety
+    ///
     unsafe fn uninstall_protocol_interface_unchecked(
         &self,
         handle: efi::Handle,
@@ -317,6 +365,12 @@ pub trait BootServices: Sized {
         interface: *mut c_void,
     ) -> Result<(), efi::Status>;
 
+    /// Reinstalls a protocol interface on a device handle.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-reinstallprotocolinterface" target="_blank">
+    /// 7.3.4. EFI_BOOT_SERVICES.ReinstallProtocolInterface()
+    /// </a>
     fn reinstall_protocol_interface<P: Protocol<Interface = I> + 'static, I: 'static>(
         &self,
         handle: efi::Handle,
@@ -344,6 +398,11 @@ pub trait BootServices: Sized {
         }
     }
 
+    /// Prefer normal [`BootServices::reinstall_protocol_interface`] when possible.
+    ///
+    /// # Safety
+    /// When calling this method, you have to make sure that if *new_protocol_interface* pointer is non-null, it is adhereing to
+    /// the structure associated with the protocol.  
     unsafe fn reinstall_protocol_interface_unchecked(
         &self,
         handle: efi::Handle,
@@ -352,17 +411,35 @@ pub trait BootServices: Sized {
         new_protocol_interface: *mut c_void,
     ) -> Result<(), efi::Status>;
 
+    /// Creates an event that is to be signaled whenever an interface is installed for a specified protocol.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-registerprotocolnotify" target="_blank">
+    /// 7.3.5. EFI_BOOT_SERVICES.RegisterProtocolNotify()
+    /// </a>
     fn register_protocol_notify(
         &self,
         protocol: &'static efi::Guid,
         event: efi::Event,
     ) -> Result<Registration, efi::Status>;
 
+    /// Returns an array of handles that support a specified protocol.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-locatehandle" target="_blank">
+    /// 7.3.6. EFI_BOOT_SERVICES.LocateHandle()
+    /// </a>
     fn locate_handle<'a>(
         &'a self,
         search_type: HandleSearchType,
     ) -> Result<BootServicesBox<'a, [efi::Handle], Self>, efi::Status>;
 
+    /// Queries a handle to determine if it supports a specified protocol.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-handleprotocol" target="_blank">
+    /// 7.3.7. EFI_BOOT_SERVICES.HandleProtocol()
+    /// </a>
     fn handle_protocol<P: Protocol<Interface = I> + 'static, I: 'static>(
         &self,
         handle: efi::Handle,
@@ -374,14 +451,38 @@ pub trait BootServices: Sized {
         }
     }
 
-    fn handle_protocol_unchecked(&self, handle: efi::Handle, protocol: &efi::Guid) -> Result<*mut c_void, efi::Status>;
+    /// Prefer normal [`BootServices::handle_protocol`] when possible.
+    ///
+    /// # Safety
+    ///
+    unsafe fn handle_protocol_unchecked(
+        &self,
+        handle: efi::Handle,
+        protocol: &efi::Guid,
+    ) -> Result<*mut c_void, efi::Status>;
 
+    /// Locates the handle to a device on the device path that supports the specified protocol.
+    ///
+    /// # Safety
+    ///
+    ///  
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-locatedevicepath" target="_blank">
+    /// 7.3.8. EFI_BOOT_SERVICES.LocateDevicePath()
+    /// </a>
     unsafe fn locate_device_path(
         &self,
         protocol: &efi::Guid,
         device_path: *mut *mut efi::protocols::device_path::Protocol,
     ) -> Result<efi::Handle, efi::Status>;
 
+    /// Queries a handle to determine if it supports a specified protocol.
+    /// If the protocol is supported by the handle, it opens the protocol on behalf of the calling agent.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-openprotocol" target="_blank">
+    /// 7.3.9. EFI_BOOT_SERVICES.OpenProtocol()
+    /// </a>
     fn open_protocol<P: Protocol<Interface = I> + 'static, I: 'static>(
         &self,
         handle: efi::Handle,
@@ -397,7 +498,12 @@ pub trait BootServices: Sized {
         }
     }
 
-    fn open_protocol_unchecked(
+    /// Prefer normal [`BootServices::open_protocol`] when possible.
+    ///
+    /// # Safety
+    ///
+    /// When calling this method, you have to make sure that if *agent_handle* pointer is non-null.  
+    unsafe fn open_protocol_unchecked(
         &self,
         handle: efi::Handle,
         protocol: &efi::Guid,
@@ -406,6 +512,12 @@ pub trait BootServices: Sized {
         attribute: u32,
     ) -> Result<*mut c_void, efi::Status>;
 
+    /// Closes a protocol on a handle that was previously opened.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-closeprotocol" target="_blank">
+    /// 7.3.10. EFI_BOOT_SERVICES.CloseProtocol()
+    /// </a>
     fn close_protocol(
         &self,
         handle: efi::Handle,
@@ -414,12 +526,28 @@ pub trait BootServices: Sized {
         controller_handle: efi::Handle,
     ) -> Result<(), efi::Status>;
 
+    /// Retrieves the list of agents that currently have a protocol interface opened.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-openprotocolinformation" target="_blank">
+    /// 7.3.11. EFI_BOOT_SERVICES.OpenProtocolInformation()
+    /// </a>
     fn open_protocol_information<'a>(
         &'a self,
         handle: efi::Handle,
         protocol: &efi::Guid,
     ) -> Result<BootServicesBox<'a, [efi::OpenProtocolInformationEntry], Self>, efi::Status>;
 
+    /// Connects one or more drivers to a controller.
+    ///
+    /// # Safety
+    ///
+    /// When calling this method, you have to make sure that *driver_image_handle*'s last entry is null per UEFI specification.
+    ///  
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-connectcontroller" target="_blank">
+    /// 7.3.12. EFI_BOOT_SERVICES.ConnectController()
+    /// </a>
     unsafe fn connect_controller(
         &self,
         controller_handle: efi::Handle,
@@ -428,6 +556,12 @@ pub trait BootServices: Sized {
         recursive: bool,
     ) -> Result<(), efi::Status>;
 
+    /// Disconnects one or more drivers from a controller.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-disconnectcontroller" target="_blank">
+    /// 7.3.13. EFI_BOOT_SERVICES.DisconnectController()
+    /// </a>
     fn disconnect_controller(
         &self,
         controller_handle: efi::Handle,
@@ -435,16 +569,34 @@ pub trait BootServices: Sized {
         child_handle: Option<efi::Handle>,
     ) -> Result<(), efi::Status>;
 
+    /// Retrieves the list of protocol interface GUIDs that are installed on a handle in a buffer allocated from pool.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-protocolsperhandle" target="_blank">
+    /// 7.3.14. EFI_BOOT_SERVICES.ProtocolsPerHandle()
+    /// </a>
     fn protocols_per_handle<'a>(
         &'a self,
         handle: efi::Handle,
     ) -> Result<BootServicesBox<'a, [efi::Guid], Self>, efi::Status>;
 
+    /// Returns an array of handles that support the requested protocol in a buffer allocated from pool.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-locatehandlebuffer" target="_blank">
+    /// 7.3.15. EFI_BOOT_SERVICES.LocateHandleBuffer()
+    /// </a>
     fn locate_handle_buffer<'a>(
         &'a self,
         search_type: HandleSearchType,
     ) -> Result<BootServicesBox<'a, [efi::Handle], Self>, efi::Status>;
 
+    /// Returns the first protocol instance that matches the given protocol.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-locateprotocol" target="_blank">
+    /// 7.3.16. EFI_BOOT_SERVICES.LocateProtocol()
+    /// </a>
     fn locate_protocol<P: Protocol<Interface = I> + 'static, I: 'static>(
         &self,
         protocol: &P,
@@ -460,12 +612,22 @@ pub trait BootServices: Sized {
         }
     }
 
-    fn locate_protocol_unchecked(
+    /// Prefer normal [`BootServices::locate_protocol`] when possible.
+    ///
+    /// # Safety
+    ///
+    unsafe fn locate_protocol_unchecked(
         &self,
         protocol: &'static efi::Guid,
         registration: *mut c_void,
     ) -> Result<*mut c_void, efi::Status>;
 
+    /// Adds, updates, or removes a configuration table entry from the EFI System Table.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-installconfigurationtable" target="_blank">
+    /// 7.5.6. EFI_BOOT_SERVICES.InstallConfigurationTable()
+    /// </a>
     fn install_configuration_table<T: StaticPtrMut + 'static>(
         &self,
         guid: &efi::Guid,
@@ -473,6 +635,11 @@ pub trait BootServices: Sized {
     ) -> Result<(), efi::Status> {
         unsafe { self.install_configuration_table_unchecked(guid, table.into_raw_mut() as *mut c_void) }
     }
+
+    /// Prefer normal [`BootServices::install_configuration_table`] when possible.
+    ///
+    /// # Safety
+    ///
     unsafe fn install_configuration_table_unchecked(
         &self,
         guid: &efi::Guid,
@@ -824,7 +991,11 @@ impl BootServices for StandardBootServices<'_> {
         }
     }
 
-    fn handle_protocol_unchecked(&self, handle: efi::Handle, protocol: &efi::Guid) -> Result<*mut c_void, efi::Status> {
+    unsafe fn handle_protocol_unchecked(
+        &self,
+        handle: efi::Handle,
+        protocol: &efi::Guid,
+    ) -> Result<*mut c_void, efi::Status> {
         let handle_protocol = self.efi_boot_services().handle_protocol;
         if handle_protocol as usize == 0 {
             panic!("function not initialize.")
@@ -852,7 +1023,7 @@ impl BootServices for StandardBootServices<'_> {
         }
     }
 
-    fn open_protocol_unchecked(
+    unsafe fn open_protocol_unchecked(
         &self,
         handle: efi::Handle,
         protocol: &efi::Guid,
@@ -1018,7 +1189,7 @@ impl BootServices for StandardBootServices<'_> {
         }
     }
 
-    fn locate_protocol_unchecked(
+    unsafe fn locate_protocol_unchecked(
         &self,
         protocol: &'static efi::Guid,
         registration: *mut c_void,
