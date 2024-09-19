@@ -1564,4 +1564,46 @@ mod test {
         let status = boot_services.free_pages(0x100000, 10);
         assert!(matches!(status, Ok(())));
     }
+
+    #[test]
+    fn test_allocate_pool() {
+        let boot_services = boot_services!(allocate_pool = efi_allocate_pool);
+
+        extern "efiapi" fn efi_allocate_pool(
+            mem_type: efi::MemoryType,
+            size: usize,
+            buffer: *mut *mut c_void,
+        ) -> efi::Status {
+            let expected_mem_type: efi::MemoryType = MemoryType::MEMORY_MAPPED_IO.into();
+            assert_eq!(mem_type, expected_mem_type);
+            assert_eq!(size, 10);
+            unsafe { ptr::write(buffer, 0x55AA as *mut c_void) };
+            efi::Status::SUCCESS
+        }
+
+        let status = boot_services.allocate_pool(MemoryType::MEMORY_MAPPED_IO, 10);
+        assert_eq!(status, Ok(0x55AA as *mut u8));
+    }
+
+    #[test]
+    fn test_free_pool() {
+        let boot_services = boot_services!(free_pool = efi_free_pool);
+
+        extern "efiapi" fn efi_free_pool(buffer: *mut c_void) -> efi::Status {
+            if buffer.is_null() {
+                return efi::Status::INVALID_PARAMETER;
+            } else {
+                assert_eq!(buffer, 0xffff0000 as *mut u8 as *mut c_void);
+                return efi::Status::SUCCESS;
+            }
+        }
+
+        // positive test
+        let status = boot_services.free_pool(0xffff0000 as *mut u8);
+        assert_eq!(status, Ok(()));
+
+        // negative test
+        let status = boot_services.free_pool(ptr::null_mut());
+        assert_eq!(status, Err(efi::Status::INVALID_PARAMETER));
+    }
 }
