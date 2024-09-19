@@ -162,7 +162,7 @@ pub trait BootServices: Sized {
         unsafe {
             self.create_event_ex_unchecked(
                 event_type,
-                notify_tpl.into(),
+                notify_tpl,
                 mem::transmute(notify_function),
                 notify_context.into_raw() as *mut <T as StaticPtr>::Pointee,
                 event_group,
@@ -229,7 +229,7 @@ pub trait BootServices: Sized {
     /// Raises a task's priority level and returns a [`TplGuard`] that will restore the tpl when dropped.
     ///
     /// See [`BootServices::raise_tpl`] and [`BootServices::restore_tpl`] for more details.
-    fn raise_tpl_guarded<'a>(&'a self, tpl: Tpl) -> TplGuard<'a, Self> {
+    fn raise_tpl_guarded(&self, tpl: Tpl) -> TplGuard<'_, Self> {
         TplGuard { boot_services: self, retore_tpl: self.raise_tpl(tpl) }
     }
 
@@ -264,6 +264,9 @@ pub trait BootServices: Sized {
 
     fn free_pages(&self, address: usize, nb_pages: usize) -> Result<(), efi::Status>;
 
+    // Allowing Clippy's needless_lifetimes lint due to the necessity of an explicit lifetime for BootServicesBox,
+    // which is used by MemoryMap.
+    #[allow(clippy::needless_lifetimes)]
     fn get_memory_map<'a>(&'a self) -> Result<MemoryMap<'a, Self>, (efi::Status, usize)>;
 
     fn allocate_pool(&self, pool_type: MemoryType, size: usize) -> Result<*mut u8, efi::Status>;
@@ -289,6 +292,11 @@ pub trait BootServices: Sized {
         unsafe { self.install_protocol_interface_unchecked(handle, protocol.protocol_guid(), interface_ptr) }
     }
 
+    /// # Safety
+    ///
+    /// Any user using `fn install_protocol_interface_unchecked()` should ensure that the interface is of the right
+    /// type for the specified protocol before calling the function. Failure to do so could lead to unexpected runtime
+    /// behaviors.
     unsafe fn install_protocol_interface_unchecked(
         &self,
         handle: Option<efi::Handle>,
@@ -296,7 +304,11 @@ pub trait BootServices: Sized {
         interface: *mut c_void,
     ) -> Result<efi::Handle, efi::Status>;
 
-    fn uninstall_protocol_interface<P: Protocol<Interface = I> + 'static, I: Any + 'static>(
+    /// # Safety
+    ///
+    /// Any user using `fn uninstall_protocol_interface()` should ensure that the efi::Handle pointer is a valid
+    /// pointer. Failure to do so could lead to unexpected runtime behaviors.
+    unsafe fn uninstall_protocol_interface<P: Protocol<Interface = I> + 'static, I: Any + 'static>(
         &self,
         handle: efi::Handle,
         protocol: &P,
@@ -310,6 +322,11 @@ pub trait BootServices: Sized {
         unsafe { self.uninstall_protocol_interface_unchecked(handle, protocol.protocol_guid(), interface_ptr) }
     }
 
+    /// # Safety
+    ///
+    /// Any user using `fn uninstall_protocol_interface_unchecked()` should ensure that the interface is of the right
+    /// type for the specified protocol before calling the function. Failure to do so could lead to unexpected runtime
+    /// behaviors.
     unsafe fn uninstall_protocol_interface_unchecked(
         &self,
         handle: efi::Handle,
@@ -317,7 +334,11 @@ pub trait BootServices: Sized {
         interface: *mut c_void,
     ) -> Result<(), efi::Status>;
 
-    fn reinstall_protocol_interface<P: Protocol<Interface = I> + 'static, I: 'static>(
+    /// # Safety
+    ///
+    /// Any user using `fn reinstall_protocol_interface()` should ensure that the efi::Handle pointer is a valid
+    /// pointer. Failure to do so could lead to unexpected runtime behaviors.
+    unsafe fn reinstall_protocol_interface<P: Protocol<Interface = I> + 'static, I: 'static>(
         &self,
         handle: efi::Handle,
         protocol: &P,
@@ -333,7 +354,7 @@ pub trait BootServices: Sized {
             old_protocol_interface_ptr = old_protocol_interface as *mut _ as *mut c_void;
             new_protocol_interface_ptr = new_protocol_interface as *mut _ as *mut c_void;
         }
-        //SAFETY: The generic Protocol ensure that the interfaces is the right type for the specified protocol.
+        //SAFETY: The generic Protocol ensure that the interfaces are the right type for the specified protocol.
         unsafe {
             self.reinstall_protocol_interface_unchecked(
                 handle,
@@ -344,6 +365,11 @@ pub trait BootServices: Sized {
         }
     }
 
+    /// # Safety
+    ///
+    /// Any user using `fn reinstall_protocol_interface_unchecked()` should ensure that the interfaces are of the right
+    /// type for the specified protocol before calling the function. Failure to do so could lead to unexpected runtime
+    /// behaviors.
     unsafe fn reinstall_protocol_interface_unchecked(
         &self,
         handle: efi::Handle,
@@ -358,6 +384,8 @@ pub trait BootServices: Sized {
         event: efi::Event,
     ) -> Result<Registration, efi::Status>;
 
+    // Allowing Clippy's needless_lifetimes lint due to the necessity of an explicit lifetime for BootServicesBox.
+    #[allow(clippy::needless_lifetimes)]
     fn locate_handle<'a>(
         &'a self,
         search_type: HandleSearchType,
@@ -376,6 +404,10 @@ pub trait BootServices: Sized {
 
     fn handle_protocol_unchecked(&self, handle: efi::Handle, protocol: &efi::Guid) -> Result<*mut c_void, efi::Status>;
 
+    /// # Safety
+    ///
+    /// Any user using `fn locate_device_path()` should manually ensure that device_path is a valid Protocol pointer
+    /// before calling the function. Failure to do so could lead to unexpected runtime behaviors.
     unsafe fn locate_device_path(
         &self,
         protocol: &efi::Guid,
@@ -420,6 +452,10 @@ pub trait BootServices: Sized {
         protocol: &efi::Guid,
     ) -> Result<BootServicesBox<'a, [efi::OpenProtocolInformationEntry], Self>, efi::Status>;
 
+    /// # Safety
+    ///
+    /// Any user using `fn connect_controller()` should manually ensure that remaining_device_path is a valid Protocol
+    /// pointer before calling the function. Failure to do so could lead to unexpected runtime behaviors.
     unsafe fn connect_controller(
         &self,
         controller_handle: efi::Handle,
@@ -435,11 +471,15 @@ pub trait BootServices: Sized {
         child_handle: Option<efi::Handle>,
     ) -> Result<(), efi::Status>;
 
+    // Allowing Clippy's needless_lifetimes lint due to the necessity of an explicit lifetime for BootServicesBox.
+    #[allow(clippy::needless_lifetimes)]
     fn protocols_per_handle<'a>(
         &'a self,
         handle: efi::Handle,
     ) -> Result<BootServicesBox<'a, [efi::Guid], Self>, efi::Status>;
 
+    // Allowing Clippy's needless_lifetimes lint due to the necessity of an explicit lifetime for BootServicesBox.
+    #[allow(clippy::needless_lifetimes)]
     fn locate_handle_buffer<'a>(
         &'a self,
         search_type: HandleSearchType,
@@ -473,6 +513,11 @@ pub trait BootServices: Sized {
     ) -> Result<(), efi::Status> {
         unsafe { self.install_configuration_table_unchecked(guid, table.into_raw_mut() as *mut c_void) }
     }
+
+    /// # Safety
+    ///
+    /// Any user using `fn install_configuration_table_unchecked()` should manually ensure that table is a valid
+    /// pointer before calling the function. Failure to do so could lead to unexpected runtime behaviors.
     unsafe fn install_configuration_table_unchecked(
         &self,
         guid: &efi::Guid,
@@ -649,7 +694,7 @@ impl BootServices for StandardBootServices<'_> {
         }
     }
 
-    fn get_memory_map<'a>(&'a self) -> Result<MemoryMap<'a, Self>, (efi::Status, usize)> {
+    fn get_memory_map(&self) -> Result<MemoryMap<Self>, (efi::Status, usize)> {
         let get_memory_map = self.efi_boot_services().get_memory_map;
         if get_memory_map as usize == 0 {
             panic!("function not initialize.")
@@ -698,7 +743,7 @@ impl BootServices for StandardBootServices<'_> {
         }
         let mut buffer = ptr::null_mut();
         match allocate_pool(memory_type.into(), size, ptr::addr_of_mut!(buffer)) {
-            s if s.is_error() => return Err(s),
+            s if s.is_error() => Err(s),
             _ => Ok(buffer as *mut u8),
         }
     }
@@ -709,7 +754,7 @@ impl BootServices for StandardBootServices<'_> {
             panic!("function not initialize.")
         }
         match free_pool(buffer as *mut c_void) {
-            s if s.is_error() => return Err(s),
+            s if s.is_error() => Err(s),
             _ => Ok(()),
         }
     }
@@ -819,7 +864,7 @@ impl BootServices for StandardBootServices<'_> {
         ) {
             s if s.is_error() => Err(s),
             _ => Ok(unsafe {
-                BootServicesBox::from_raw_parts(buffer as *mut _, buffer_size / mem::size_of::<efi::Handle>(), &self)
+                BootServicesBox::from_raw_parts(buffer as *mut _, buffer_size / mem::size_of::<efi::Handle>(), self)
             }),
         }
     }
@@ -1052,8 +1097,6 @@ impl BootServices for StandardBootServices<'_> {
 
 #[cfg(test)]
 mod test {
-    use efi;
-
     use super::*;
     use core::{mem::MaybeUninit, sync::atomic::AtomicUsize};
 
@@ -1131,7 +1174,7 @@ mod test {
             ctx,
         );
 
-        assert!(matches!(status, Ok(_)));
+        assert!(status.is_ok());
     }
 
     #[test]
@@ -1156,7 +1199,7 @@ mod test {
         let status =
             boot_services.create_event(EventType::RUNTIME | EventType::NOTIFY_SIGNAL, Tpl::APPLICATION, None, &());
 
-        assert!(matches!(status, Ok(_)));
+        assert!(status.is_ok());
     }
 
     #[test]
@@ -1205,7 +1248,7 @@ mod test {
             &GUID,
         );
 
-        assert!(matches!(status, Ok(_)));
+        assert!(status.is_ok());
     }
 
     #[test]
@@ -1237,7 +1280,7 @@ mod test {
             &GUID,
         );
 
-        assert!(matches!(status, Ok(_)));
+        assert!(status.is_ok());
     }
 
     #[test]
@@ -1402,7 +1445,7 @@ mod test {
     #[should_panic = "function not initialize."]
     fn test_restore_tpl_not_init() {
         let boot_services = boot_services!();
-        let _ = boot_services.restore_tpl(Tpl::APPLICATION);
+        boot_services.restore_tpl(Tpl::APPLICATION);
     }
 
     #[test]
