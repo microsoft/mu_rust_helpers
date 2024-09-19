@@ -208,7 +208,7 @@ pub trait RuntimeServices: Sized {
         let mut next_namespace: efi::Guid = efi::Guid::from_bytes(&[0x0; 16]);
 
         unsafe {
-            self.get_next_variable_name_unchecked_new(
+            self.get_next_variable_name_unchecked(
                 &prev_name,
                 &prev_namespace,
                 &mut next_name,
@@ -474,9 +474,9 @@ mod test {
         pub value: u32,
     }
 
-    impl AsMut<[u8]> for DummyVariableType {
-        fn as_mut(&mut self) -> &mut [u8] {
-            unsafe { slice::from_raw_parts_mut::<u8>(ptr::addr_of_mut!(self.value) as *mut u8, mem::size_of::<u32>()) }
+    impl AsRef<[u8]> for DummyVariableType {
+        fn as_ref(&self) -> &[u8] {
+            unsafe { slice::from_raw_parts::<u8>(ptr::addr_of!(self.value) as *mut u8, mem::size_of::<u32>()) }
         }
     }
 
