@@ -74,6 +74,12 @@ unsafe impl Send for StandardRuntimeServices<'static> {}
 
 #[cfg_attr(any(test, feature = "mockall"), automock)]
 pub trait RuntimeServices: Sized {
+    /// Sets a UEFI variable.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html#setvariable" target="_blank">
+    ///   8.2.3. EFI_RUNTIME_SERVICES.SetVariable()
+    /// </a>
     fn set_variable<T>(
         &self,
         name: &[u16],
@@ -94,6 +100,12 @@ pub trait RuntimeServices: Sized {
         unsafe { self.set_variable_unchecked(name_vec.as_mut_slice(), namespace, attributes, data.as_ref()) }
     }
 
+    /// Sets a UEFI variable.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html#getvariable" target="_blank">
+    ///   8.2.1. EFI_RUNTIME_SERVICES.GetVariable()
+    /// </a>
     fn get_variable<T>(
         &self,
         name: &[u16],
@@ -152,6 +164,7 @@ pub trait RuntimeServices: Sized {
         }
     }
 
+    /// Helper function to get a UEFI variables size and attributes
     fn get_variable_size_and_attributes(
         &self,
         name: &[u16],
@@ -175,6 +188,12 @@ pub trait RuntimeServices: Sized {
         }
     }
 
+    /// Gets the next UEFI variable's name.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html#getnextvariablename" target="_blank">
+    ///   8.2.2. EFI_RUNTIME_SERVICES.GetNextVariableName()
+    /// </a>
     fn get_next_variable_name(
         &self,
         prev_name: &[u16],
@@ -183,10 +202,19 @@ pub trait RuntimeServices: Sized {
         unsafe { self.get_next_variable_name_unchecked(prev_name, prev_namespace) }
     }
 
-    fn query_variable_info(&self, attributes: u32) -> Result<VariableInfo, efi::Status> {
-        unsafe { self.query_variable_info_unchecked(attributes) }
-    }
+    /// Queries variable information for given UEFI variable attributes.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html#queryvariableinfo" target="_blank">
+    ///   8.2.4. EFI_RUNTIME_SERVICES.QueryVariableInfo()
+    /// </a>
+    fn query_variable_info(&self, attributes: u32) -> Result<VariableInfo, efi::Status>;
 
+    /// Set's a UEFI variable
+    ///
+    /// # Safety
+    ///
+    /// Ensure name is null-terminated
     unsafe fn set_variable_unchecked(
         &self,
         name: &mut [u16],
@@ -195,6 +223,11 @@ pub trait RuntimeServices: Sized {
         data: &[u8],
     ) -> Result<(), efi::Status>;
 
+    /// Gets a UEFI variable
+    ///
+    /// # Safety
+    ///
+    /// Ensure name is null-terminated
     unsafe fn get_variable_unchecked<'a>(
         &self,
         name: &mut [u16],
@@ -202,13 +235,17 @@ pub trait RuntimeServices: Sized {
         data: Option<&'a mut [u8]>,
     ) -> GetVariableStatus;
 
+    /// Gets a UEFI variable
+    ///
+    /// # Safety
+    ///
+    /// Ensure name is null-terminated
     unsafe fn get_next_variable_name_unchecked(
         &self,
         prev_name: &[u16],
         prev_namespace: &efi::Guid,
     ) -> Result<(Vec<u16>, efi::Guid), efi::Status>;
 
-    unsafe fn query_variable_info_unchecked(&self, attributes: u32) -> Result<VariableInfo, efi::Status>;
 }
 
 impl RuntimeServices for StandardRuntimeServices<'_> {
@@ -326,7 +363,7 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
         }
     }
 
-    unsafe fn query_variable_info_unchecked(&self, attributes: u32) -> Result<VariableInfo, efi::Status> {
+    fn query_variable_info(&self, attributes: u32) -> Result<VariableInfo, efi::Status> {
         let query_variable_info = self.efi_runtime_services().query_variable_info;
         if query_variable_info as usize == 0 {
             panic!("QueryVariableInfo has not initialized in the Runtime Services Table.")
@@ -338,12 +375,14 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
             maximum_variable_size: 0,
         };
 
-        let status = query_variable_info(
-            attributes,
-            ptr::addr_of_mut!(var_info.maximum_variable_storage_size),
-            ptr::addr_of_mut!(var_info.remaining_variable_storage_size),
-            ptr::addr_of_mut!(var_info.maximum_variable_size),
-        );
+        let status = unsafe {
+            query_variable_info(
+                attributes,
+                ptr::addr_of_mut!(var_info.maximum_variable_storage_size),
+                ptr::addr_of_mut!(var_info.remaining_variable_storage_size),
+                ptr::addr_of_mut!(var_info.maximum_variable_size),
+            )
+        };
 
         if status.is_error() {
             return Err(status);
