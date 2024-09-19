@@ -189,6 +189,7 @@ pub trait RuntimeServices: Sized {
     }
 
     /// Gets the next UEFI variable's name.
+    /// Note: Unlike get_variable, a non-null terminated name will return INVALID_PARAMETER per UEFI spec
     ///
     /// UEFI Spec Documentation:
     /// <a href="https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html#getnextvariablename" target="_blank">
@@ -199,7 +200,23 @@ pub trait RuntimeServices: Sized {
         prev_name: &[u16],
         prev_namespace: &efi::Guid,
     ) -> Result<(Vec<u16>, efi::Guid), efi::Status> {
-        unsafe { self.get_next_variable_name_unchecked(prev_name, prev_namespace) }
+        if prev_name.len() == 0 {
+            panic!("Zero-length name passed into get_next_variable_name.");
+        }
+
+        let mut next_name = Vec::<u16>::new();
+        let mut next_namespace: efi::Guid = efi::Guid::from_bytes(&[0x0; 16]);
+
+        unsafe {
+            self.get_next_variable_name_unchecked_new(
+                &prev_name,
+                &prev_namespace,
+                &mut next_name,
+                &mut next_namespace,
+            )?;
+        };
+
+        Ok((next_name, next_namespace))
     }
 
     /// Queries variable information for given UEFI variable attributes.
@@ -244,8 +261,9 @@ pub trait RuntimeServices: Sized {
         &self,
         prev_name: &[u16],
         prev_namespace: &efi::Guid,
-    ) -> Result<(Vec<u16>, efi::Guid), efi::Status>;
-
+        next_name: &mut Vec<u16>,
+        next_namespace: &mut efi::Guid,
+    ) -> Result<(), efi::Status>;
 }
 
 impl RuntimeServices for StandardRuntimeServices<'_> {
@@ -313,52 +331,53 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
         GetVariableStatus::Success { data_size: data_size, attributes: attributes }
     }
 
-    // Note: Unlike get_variable, a non-null terminated name will return INVALID_PARAMETER per UEFI spec
     unsafe fn get_next_variable_name_unchecked(
         &self,
         prev_name: &[u16],
         prev_namespace: &efi::Guid,
-    ) -> Result<(Vec<u16>, efi::Guid), efi::Status> {
+        next_name: &mut Vec<u16>,
+        next_namespace: &mut efi::Guid,
+    ) -> Result<(), efi::Status> {
         let get_next_variable_name = self.efi_runtime_services().get_next_variable_name;
         if get_next_variable_name as usize == 0 {
             panic!("GetNextVariableName has not initialized in the Runtime Services Table.")
         }
 
-        if prev_name.len() == 0 {
-            panic!("Zero-length name passed into get_next_variable_name.");
+        // Copy prev_name and namespace into next name abd banesoace
+        if next_name.len() < prev_name.len() {
+            next_name.resize(prev_name.len(), 0);
         }
+        next_name[..prev_name.len()].clone_from_slice(prev_name);
+        next_namespace.clone_from(prev_namespace);
 
-        let mut name = prev_name.to_vec();
+        let mut next_name_size: usize = next_name.len();
 
-        let mut name_size: usize = name.len();
-        let mut namespace: efi::Guid = *prev_namespace;
-
+        // Loop at most two times. If the size of the previous name is sufficient for the next, then only
+        // one call to the EFI function will be made. Otherwise, the first call will be used to determine
+        // the appropriate size that the buffer should be resized to for the second call.
         let mut first_try: bool = true;
         loop {
             let status =
-                get_next_variable_name(ptr::addr_of_mut!(name_size), name.as_mut_ptr(), ptr::addr_of_mut!(namespace));
+                get_next_variable_name(ptr::addr_of_mut!(next_name_size), next_name.as_mut_ptr(), next_namespace);
 
             if status == efi::Status::BUFFER_TOO_SMALL && first_try {
                 first_try = false;
 
-                assert!(name_size > name.len(), "get_next_variable_name requested smaller buffer.");
-                name.resize(name_size, 0);
+                assert!(
+                    next_name_size > next_name.len(),
+                    "get_next_variable_name requested smaller buffer on BUFFER_TOO_SMALL."
+                );
+
+                // Resize name to be able to fit the size of the next name
+                next_name.resize(next_name_size, 0);
 
                 // Reset fields which may have been overwritten
-                name.splice(0..prev_name.len(), prev_name.iter().cloned());
-
-                namespace = *prev_namespace;
+                next_name[..prev_name.len()].clone_from_slice(prev_name);
+                next_namespace.clone_from(prev_namespace);
             } else if status.is_error() {
                 return Err(status);
             } else {
-                name.truncate(
-                    name.iter()
-                        .position(|&c| c == 0)
-                        .expect("Name returned by get_next_variable_name is not null-terminated.")
-                        + 1,
-                );
-
-                return Ok((name, namespace));
+                return Ok(());
             }
         }
     }
@@ -375,14 +394,12 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
             maximum_variable_size: 0,
         };
 
-        let status = unsafe {
-            query_variable_info(
-                attributes,
-                ptr::addr_of_mut!(var_info.maximum_variable_storage_size),
-                ptr::addr_of_mut!(var_info.remaining_variable_storage_size),
-                ptr::addr_of_mut!(var_info.maximum_variable_size),
-            )
-        };
+        let status = query_variable_info(
+            attributes,
+            ptr::addr_of_mut!(var_info.maximum_variable_storage_size),
+            ptr::addr_of_mut!(var_info.remaining_variable_storage_size),
+            ptr::addr_of_mut!(var_info.maximum_variable_size),
+        );
 
         if status.is_error() {
             return Err(status);
