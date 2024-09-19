@@ -117,6 +117,11 @@ pub trait RuntimeServices: Sized {
             data.resize(size_hint.unwrap(), 0);
         }
 
+        // Do at most two calls to get_variable_unchecked.
+        //
+        // If size_hint was provided (and the size is sufficient), then only call to get_variable_unchecked is
+        // needed. Otherwise, the first check will determine the size of the buffer to allocate for the second
+        // call.
         let mut first_attempt = true;
         loop {
             unsafe {
