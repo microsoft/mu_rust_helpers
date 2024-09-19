@@ -15,8 +15,8 @@ use core::{
     sync::atomic::{AtomicPtr, Ordering},
 };
 
-use variable_services::{GetVariableStatus, VariableInfo};
 use r_efi::efi;
+use variable_services::{GetVariableStatus, VariableInfo};
 
 /// This is the runtime services used in the UEFI.
 /// it wraps an atomic ptr to [`efi::RuntimeServices`]
@@ -50,7 +50,7 @@ impl<'a> StandardRuntimeServices<'a> {
             // The efi::RuntimeServices is only read, that is why we use a non mutable reference.
             self.efi_runtime_services.store(efi_runtime_services as *const _ as *mut _, Ordering::SeqCst)
         } else {
-            panic!("Runtime services is already initialize.")
+            panic!("Runtime services is already initialized.")
         }
     }
 
@@ -62,7 +62,7 @@ impl<'a> StandardRuntimeServices<'a> {
             self.efi_runtime_services
                 .load(Ordering::SeqCst)
                 .as_ref::<'a>()
-                .expect("Runtime services is not initialize.")
+                .expect("Runtime services is not initialized.")
         }
     }
 }
@@ -89,8 +89,7 @@ pub trait RuntimeServices: Sized {
         }
 
         // Keep a local copy of name to unburden the caller of having to pass in a mutable slice
-        let mut name_vec = Vec::<u16>::new();
-        name_vec.copy_from_slice(name);
+        let mut name_vec = name.to_vec();
 
         unsafe { self.set_variable_unchecked(name_vec.as_mut_slice(), namespace, attributes, data.as_mut()) }
     }
@@ -100,37 +99,47 @@ pub trait RuntimeServices: Sized {
         name: &[u16],
         namespace: &efi::Guid,
         size_hint: Option<usize>,
-    ) -> Result<(Option<T>, u32), efi::Status>
+    ) -> Result<(T, u32), efi::Status>
     where
         T: TryFrom<Vec<u8>> + 'static,
     {
         if !name.iter().position(|&c| c == 0).is_some() {
-            panic!("Name passed into set_variable is not null-terminated.");
+            panic!("Name passed into get_variable is not null-terminated.");
         }
 
         // Keep a local copy of name to unburden the caller of having to pass in a mutable slice
-        let mut name_vec = Vec::<u16>::new();
-        name_vec.copy_from_slice(name);
+        let mut name_vec = name.to_vec();
 
         // We can't simply allocate an empty buffer of size T because we can't assume
         // the TryFrom representation of T will be the same as T
-        let mut data: Vec<u8> = match size_hint {
-            Some(s) => Vec::<u8>::with_capacity(s),
-            None => Vec::<u8>::new(),
-        };
+        let mut data = Vec::<u8>::new();
+        if size_hint.is_some() {
+            data.resize(size_hint.unwrap(), 0);
+        }
 
+        // Do at most two calls to get_variable_unchecked.
+        //
+        // If size_hint was provided (and the size is sufficient), then only call to get_variable_unchecked is
+        // needed. Otherwise, the first check will determine the size of the buffer to allocate for the second
+        // call.
         let mut first_attempt = true;
         loop {
             unsafe {
-                match self.get_variable_unchecked(name_vec.as_mut_slice(), namespace, Some(&mut data)) {
+                let status = self.get_variable_unchecked(
+                    name_vec.as_mut_slice(),
+                    namespace,
+                    if data.len() == 0 { None } else { Some(&mut data) },
+                );
+
+                match status {
                     GetVariableStatus::Success { data_size: _, attributes } => match T::try_from(data) {
-                        Ok(d) => return Ok((Some(d), attributes)),
+                        Ok(d) => return Ok((d, attributes)),
                         Err(_) => return Err(efi::Status::INVALID_PARAMETER),
                     },
                     GetVariableStatus::BufferTooSmall { data_size, attributes: _ } => {
                         if first_attempt {
                             first_attempt = false;
-                            data.reserve_exact(data_size - data.len())
+                            data.resize(data_size, 10);
                         } else {
                             return Err(efi::Status::BUFFER_TOO_SMALL);
                         }
@@ -153,14 +162,11 @@ pub trait RuntimeServices: Sized {
         }
 
         // Keep a local copy of name to unburden the caller of having to pass in a mutable slice
-        let mut name_vec = Vec::<u16>::new();
-        name_vec.copy_from_slice(name);
+        let mut name_vec = name.to_vec();
 
         unsafe {
             match self.get_variable_unchecked(name_vec.as_mut_slice(), namespace, None) {
-                GetVariableStatus::BufferTooSmall { data_size, attributes } => {
-                    Ok((data_size, attributes))
-                }
+                GetVariableStatus::BufferTooSmall { data_size, attributes } => Ok((data_size, attributes)),
                 GetVariableStatus::Error(e) => Err(e),
                 GetVariableStatus::Success { data_size: _, attributes: _ } => {
                     panic!("GetVariable call with zero-sized buffer returned Success.")
@@ -177,7 +183,7 @@ pub trait RuntimeServices: Sized {
         unsafe { self.get_next_variable_name_unchecked(prev_name, prev_namespace) }
     }
 
-    unsafe fn query_variable_info(&self, attributes: u32) -> Result<VariableInfo, efi::Status> {
+    fn query_variable_info(&self, attributes: u32) -> Result<VariableInfo, efi::Status> {
         unsafe { self.query_variable_info_unchecked(attributes) }
     }
 
@@ -202,8 +208,7 @@ pub trait RuntimeServices: Sized {
         prev_namespace: &efi::Guid,
     ) -> Result<(Vec<u16>, efi::Guid), efi::Status>;
 
-    unsafe fn query_variable_info_unchecked(&self, attributes: u32)
-        -> Result<VariableInfo, efi::Status>;
+    unsafe fn query_variable_info_unchecked(&self, attributes: u32) -> Result<VariableInfo, efi::Status>;
 }
 
 impl RuntimeServices for StandardRuntimeServices<'_> {
@@ -240,8 +245,8 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
         namespace: &efi::Guid,
         data: Option<&mut [u8]>,
     ) -> GetVariableStatus {
-        let set_variable = self.efi_runtime_services().get_variable;
-        if set_variable as usize == 0 {
+        let get_variable = self.efi_runtime_services().get_variable;
+        if get_variable as usize == 0 {
             panic!("GetVariable has not initialized in the Runtime Services Table.")
         }
 
@@ -251,13 +256,13 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
         };
         let mut attributes: u32 = 0;
 
-        let status = set_variable(
+        let status = get_variable(
             name.as_mut_ptr(),
             namespace as *const _ as *mut _,
             ptr::addr_of_mut!(attributes),
             ptr::addr_of_mut!(data_size),
             match data {
-                Some(mut d) => ptr::addr_of_mut!(d) as *mut c_void,
+                Some(d) => d.as_ptr() as *mut c_void,
                 None => ptr::null_mut() as *mut c_void,
             },
         );
@@ -271,6 +276,7 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
         GetVariableStatus::Success { data_size: data_size, attributes: attributes }
     }
 
+    // Note: Unlike get_variable, a non-null terminated name will return INVALID_PARAMETER per UEFI spec
     unsafe fn get_next_variable_name_unchecked(
         &self,
         prev_name: &[u16],
@@ -281,46 +287,46 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
             panic!("GetNextVariableName has not initialized in the Runtime Services Table.")
         }
 
-        let mut name = Vec::<u16>::with_capacity(prev_name.len() + 1);
-        name.extend_from_slice(prev_name);
-        name.push(0);
+        if prev_name.len() == 0 {
+            panic!("Zero-length name passed into get_next_variable_name.");
+        }
 
-        let mut name_size: usize = name.capacity();
+        let mut name = prev_name.to_vec();
+
+        let mut name_size: usize = name.len();
         let mut namespace: efi::Guid = *prev_namespace;
 
         let mut first_try: bool = true;
         loop {
-            match get_next_variable_name(ptr::addr_of_mut!(name_size), name.as_mut_ptr(), ptr::addr_of_mut!(namespace))
-            {
-                efi::Status::BUFFER_TOO_SMALL if first_try => {
-                    first_try = false;
+            let status =
+                get_next_variable_name(ptr::addr_of_mut!(name_size), name.as_mut_ptr(), ptr::addr_of_mut!(namespace));
 
-                    name.reserve(name_size - name.len());
+            if status == efi::Status::BUFFER_TOO_SMALL && first_try {
+                first_try = false;
 
-                    // Reset fields which may have been overwritten
-                    name_size = name.capacity();
+                assert!(name_size > name.len(), "get_next_variable_name requested smaller buffer.");
+                name.resize(name_size, 0);
 
-                    name.clear();
-                    name.extend_from_slice(prev_name);
-                    name.push(0);
+                // Reset fields which may have been overwritten
+                name.splice(0..prev_name.len(), prev_name.iter().cloned());
 
-                    namespace = *prev_namespace;
-                }
-                e if e.is_error() => return Err(e),
-                _ => {
-                    // Shorten name to include up to first null byte
-                    name.truncate(name.iter().position(|&c| c == 0).unwrap() + 1);
+                namespace = *prev_namespace;
+            } else if status.is_error() {
+                return Err(status);
+            } else {
+                name.truncate(
+                    name.iter()
+                        .position(|&c| c == 0)
+                        .expect("Name returned by get_next_variable_name is not null-terminated.")
+                        + 1,
+                );
 
-                    return Ok((name, namespace));
-                }
+                return Ok((name, namespace));
             }
         }
     }
 
-    unsafe fn query_variable_info_unchecked(
-        &self,
-        attributes: u32,
-    ) -> Result<VariableInfo, efi::Status> {
+    unsafe fn query_variable_info_unchecked(&self, attributes: u32) -> Result<VariableInfo, efi::Status> {
         let query_variable_info = self.efi_runtime_services().query_variable_info;
         if query_variable_info as usize == 0 {
             panic!("QueryVariableInfo has not initialized in the Runtime Services Table.")
@@ -352,14 +358,14 @@ mod test {
     use efi;
 
     use super::*;
-    use core::mem;
+    use core::{mem, slice};
 
     macro_rules! runtime_services {
     ($($efi_services:ident = $efi_service_fn:ident),*) => {{
       static RUNTIME_SERVICE: StandardRuntimeServices = StandardRuntimeServices::new_uninit();
       let efi_runtime_services = unsafe {
         #[allow(unused_mut)]
-        let mut rs = MaybeUninit::<efi::RuntimeServices>::zeroed();
+        let mut rs = mem::MaybeUninit::<efi::RuntimeServices>::zeroed();
         $(
           rs.assume_init_mut().$efi_services = $efi_service_fn;
         )*
@@ -384,5 +390,356 @@ mod test {
         let rs = StandardRuntimeServices::new_uninit();
         rs.initialize(efi_rs);
         rs.initialize(efi_rs);
+    }
+
+    const DUMMY_NAME: [u16; 3] = [0x1000, 0x1020, 0x0000];
+    const DUMMY_NON_NULL_TERMINATED_NAME: [u16; 3] = [0x1000, 0x1020, 0x1040];
+    const DUMMY_EMPTY_NAME: [u16; 1] = [0x0000];
+    const DUMMY_ZERO_LENGTH_NAME: [u16; 0] = [];
+    const DUMMY_NEXT_NAME: [u16; 5] = [0x1001, 0x1022, 0x1043, 0x1064, 0x0000];
+    const DUMMY_UNKNOWN_NAME: [u16; 3] = [0x2000, 0x2020, 0x0000];
+
+    const DUMMY_NODE: [u8; 6] = [0x0, 0x0, 0x0, 0x0, 0x0, 0x0];
+    const DUMMY_NAMESPACE: efi::Guid = efi::Guid::from_fields(0, 0, 0, 0, 0, &DUMMY_NODE);
+    const DUMMY_NEXT_NAMESPACE: efi::Guid = efi::Guid::from_fields(1, 0, 0, 0, 0, &DUMMY_NODE);
+
+    const DUMMY_ATTRIBUTES: u32 = 0x1234;
+    const DUMMY_INVALID_ATTRIBUTES: u32 = 0x2345;
+
+    const DUMMY_DATA: u32 = 0xDEADBEEF;
+    const DUMMY_DATA_REPR_SIZE: usize = mem::size_of::<u32>();
+
+    const DUMMY_MAXIMUM_VARIABLE_STORAGE_SIZE: u64 = 0x11111111_11111111;
+    const DUMMY_REMAINING_VARIABLE_STORAGE_SIZE: u64 = 0x22222222_22222222;
+    const DUMMY_MAXIMUM_VARIABLE_SIZE: u64 = 0x33333333_33333333;
+
+    #[derive(Debug)]
+    struct DummyVariableType {
+        pub value: u32,
+    }
+
+    impl AsMut<[u8]> for DummyVariableType {
+        fn as_mut(&mut self) -> &mut [u8] {
+            unsafe { slice::from_raw_parts_mut::<u8>(ptr::addr_of_mut!(self.value) as *mut u8, mem::size_of::<u32>()) }
+        }
+    }
+
+    impl TryFrom<Vec<u8>> for DummyVariableType {
+        type Error = &'static str;
+
+        fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+            assert!(value.len() == mem::size_of::<u32>());
+
+            Ok(DummyVariableType { value: u32::from_ne_bytes(value[0..4].try_into().unwrap()) })
+        }
+    }
+
+    extern "efiapi" fn mock_efi_get_variable(
+        name: *mut u16,
+        namespace: *mut efi::Guid,
+        attributes: *mut u32,
+        data_size: *mut usize,
+        data: *mut c_void,
+    ) -> efi::Status {
+        unsafe {
+            if DUMMY_UNKNOWN_NAME.iter().enumerate().all(|(i, &c)| *name.offset(i as isize) == c) {
+                return efi::Status::NOT_FOUND;
+            }
+
+            // Since name isn't DUMMY_UNKNOWN_NAME, we're assuming DUMMY_NAME was passed in.
+            // If name is not equal to DUMMY_NAME, then something must have gone wrong.
+            assert_eq!(
+                DUMMY_NAME.iter().enumerate().all(|(i, &c)| *name.offset(i as isize) == c),
+                true,
+                "Variable name does not match expected."
+            );
+
+            assert_eq!(*namespace, DUMMY_NAMESPACE);
+
+            *attributes = DUMMY_ATTRIBUTES;
+
+            if *data_size < DUMMY_DATA_REPR_SIZE {
+                *data_size = DUMMY_DATA_REPR_SIZE;
+                return efi::Status::BUFFER_TOO_SMALL;
+            }
+
+            *data_size = DUMMY_DATA_REPR_SIZE;
+            *(data as *mut u32) = DUMMY_DATA;
+        }
+
+        efi::Status::SUCCESS
+    }
+
+    extern "efiapi" fn mock_efi_set_variable(
+        name: *mut u16,
+        namespace: *mut efi::Guid,
+        attributes: u32,
+        data_size: usize,
+        data: *mut c_void,
+    ) -> efi::Status {
+        unsafe {
+            // Invalid parameter is returned if name is empty (first character is 0)
+            if *name == 0 {
+                return efi::Status::INVALID_PARAMETER;
+            }
+
+            if DUMMY_UNKNOWN_NAME.iter().enumerate().all(|(i, &c)| *name.offset(i as isize) == c) {
+                return efi::Status::NOT_FOUND;
+            }
+
+            // Since name isn't DUMMY_UNKNOWN_NAME, we're assuming DUMMY_NAME was passed in.
+            // If name is not equal to DUMMY_NAME, then something must have gone wrong.
+            assert_eq!(
+                DUMMY_NAME.iter().enumerate().all(|(i, &c)| *name.offset(i as isize) == c),
+                true,
+                "Variable name does not match expected."
+            );
+
+            assert_eq!(*namespace, DUMMY_NAMESPACE);
+            assert_eq!(attributes, DUMMY_ATTRIBUTES);
+            assert_eq!(data_size, DUMMY_DATA_REPR_SIZE);
+            assert_eq!(*(data as *mut u32), DUMMY_DATA);
+        }
+
+        efi::Status::SUCCESS
+    }
+
+    extern "efiapi" fn mock_efi_get_next_variable_name(
+        name_size: *mut usize,
+        name: *mut u16,
+        namespace: *mut efi::Guid,
+    ) -> efi::Status {
+        // Ensure the name and namespace are as expected
+        unsafe {
+            // Return invalid parameter if the name isn't null-terminated per UEFI spec
+            if !slice::from_raw_parts(name, *name_size).iter().position(|&c| c == 0).is_some() {
+                return efi::Status::INVALID_PARAMETER;
+            }
+
+            if DUMMY_UNKNOWN_NAME.iter().enumerate().all(|(i, &c)| *name.offset(i as isize) == c) {
+                return efi::Status::NOT_FOUND;
+            }
+
+            // Since name isn't DUMMY_UNKNOWN_NAME, we're assuming DUMMY_NAME was passed in.
+            // If name is not equal to DUMMY_NAME, then something must have gone wrong.
+            assert_eq!(
+                DUMMY_NAME.iter().enumerate().all(|(i, &c)| *name.offset(i as isize) == c),
+                true,
+                "Variable name does not match expected."
+            );
+            assert_eq!(*namespace, DUMMY_NAMESPACE);
+
+            if *name_size < DUMMY_NEXT_NAME.len() {
+                *name_size = DUMMY_NEXT_NAME.len();
+                return efi::Status::BUFFER_TOO_SMALL;
+            }
+
+            *name_size = DUMMY_NEXT_NAME.len();
+            ptr::copy_nonoverlapping(DUMMY_NEXT_NAME.as_ptr(), name, DUMMY_NEXT_NAME.len());
+            *namespace = DUMMY_NEXT_NAMESPACE;
+        }
+
+        efi::Status::SUCCESS
+    }
+
+    extern "efiapi" fn mock_efi_query_variable_info(
+        attributes: u32,
+        maximum_variable_storage_size: *mut u64,
+        remaining_variable_storage_size: *mut u64,
+        maximum_variable_size: *mut u64,
+    ) -> efi::Status {
+        if attributes == DUMMY_INVALID_ATTRIBUTES {
+            return efi::Status::INVALID_PARAMETER;
+        }
+
+        // Since attributes isn't DUMMY_INVALID_ATTRIBUTES, we're assuming DUMMY_ATTRIBUTES was passed in.
+        // If attributes is not equal to DUMMY_ATTRIBUTES, then something must have gone wrong.
+        assert_eq!(attributes, DUMMY_ATTRIBUTES);
+
+        unsafe {
+            *maximum_variable_storage_size = DUMMY_MAXIMUM_VARIABLE_STORAGE_SIZE;
+            *remaining_variable_storage_size = DUMMY_REMAINING_VARIABLE_STORAGE_SIZE;
+            *maximum_variable_size = DUMMY_MAXIMUM_VARIABLE_SIZE;
+        }
+
+        efi::Status::SUCCESS
+    }
+
+    #[test]
+    fn test_get_variable() {
+        let rs: &StandardRuntimeServices<'_> = runtime_services!(get_variable = mock_efi_get_variable);
+
+        let status = rs.get_variable::<DummyVariableType>(&DUMMY_NAME, &DUMMY_NAMESPACE, None);
+
+        assert!(status.is_ok());
+        let (data, attributes) = status.unwrap();
+        assert_eq!(attributes, DUMMY_ATTRIBUTES);
+        assert_eq!(data.value, DUMMY_DATA);
+    }
+
+    #[test]
+    #[should_panic(expected = "Name passed into get_variable is not null-terminated.")]
+    fn test_get_variable_non_terminated() {
+        let rs: &StandardRuntimeServices<'_> = runtime_services!(get_variable = mock_efi_get_variable);
+
+        let _ = rs.get_variable::<DummyVariableType>(&DUMMY_NON_NULL_TERMINATED_NAME, &DUMMY_NAMESPACE, None);
+    }
+
+    #[test]
+    fn test_get_variable_low_size_hint() {
+        let rs: &StandardRuntimeServices<'_> = runtime_services!(get_variable = mock_efi_get_variable);
+
+        let status = rs.get_variable::<DummyVariableType>(&DUMMY_NAME, &DUMMY_NAMESPACE, Some(1));
+
+        assert!(status.is_ok());
+        let (data, attributes) = status.unwrap();
+        assert_eq!(attributes, DUMMY_ATTRIBUTES);
+        assert_eq!(data.value, DUMMY_DATA);
+    }
+
+    #[test]
+    fn test_get_variable_not_found() {
+        let rs: &StandardRuntimeServices<'_> = runtime_services!(get_variable = mock_efi_get_variable);
+
+        let status = rs.get_variable::<DummyVariableType>(&DUMMY_UNKNOWN_NAME, &DUMMY_NAMESPACE, Some(1));
+
+        assert!(status.is_err());
+        assert_eq!(status.unwrap_err(), efi::Status::NOT_FOUND);
+    }
+
+    #[test]
+    fn test_get_variable_size_and_attributes() {
+        let rs: &StandardRuntimeServices<'_> = runtime_services!(get_variable = mock_efi_get_variable);
+
+        let status = rs.get_variable_size_and_attributes(&DUMMY_NAME, &DUMMY_NAMESPACE);
+
+        assert!(status.is_ok());
+        let (size, attributes) = status.unwrap();
+        assert_eq!(size, DUMMY_DATA_REPR_SIZE);
+        assert_eq!(attributes, DUMMY_ATTRIBUTES);
+    }
+
+    #[test]
+    fn test_set_variable() {
+        let rs: &StandardRuntimeServices<'_> = runtime_services!(set_variable = mock_efi_set_variable);
+
+        let mut data = DummyVariableType { value: DUMMY_DATA };
+
+        let status = rs.set_variable::<DummyVariableType>(&DUMMY_NAME, &DUMMY_NAMESPACE, DUMMY_ATTRIBUTES, &mut data);
+
+        assert!(status.is_ok());
+    }
+
+    #[test]
+    #[should_panic(expected = "Name passed into set_variable is not null-terminated.")]
+    fn test_set_variable_non_terminated() {
+        let rs: &StandardRuntimeServices<'_> = runtime_services!(set_variable = mock_efi_set_variable);
+
+        let mut data = DummyVariableType { value: DUMMY_DATA };
+
+        let _ = rs.set_variable::<DummyVariableType>(
+            &DUMMY_NON_NULL_TERMINATED_NAME,
+            &DUMMY_NAMESPACE,
+            DUMMY_ATTRIBUTES,
+            &mut data,
+        );
+    }
+
+    #[test]
+    fn test_set_variable_empty_name() {
+        let rs: &StandardRuntimeServices<'_> = runtime_services!(set_variable = mock_efi_set_variable);
+
+        let mut data = DummyVariableType { value: DUMMY_DATA };
+
+        let status =
+            rs.set_variable::<DummyVariableType>(&DUMMY_EMPTY_NAME, &DUMMY_NAMESPACE, DUMMY_ATTRIBUTES, &mut data);
+
+        assert!(status.is_err());
+        assert_eq!(status.unwrap_err(), efi::Status::INVALID_PARAMETER);
+    }
+
+    #[test]
+    fn test_set_variable_not_found() {
+        let rs: &StandardRuntimeServices<'_> = runtime_services!(set_variable = mock_efi_set_variable);
+
+        let mut data = DummyVariableType { value: DUMMY_DATA };
+
+        let status =
+            rs.set_variable::<DummyVariableType>(&DUMMY_UNKNOWN_NAME, &DUMMY_NAMESPACE, DUMMY_ATTRIBUTES, &mut data);
+
+        assert!(status.is_err());
+        assert_eq!(status.unwrap_err(), efi::Status::NOT_FOUND);
+    }
+
+    #[test]
+    fn test_get_next_variable_name() {
+        // Ensure we are testing a growing name buffer
+        assert!(DUMMY_NEXT_NAME.len() > DUMMY_NAME.len());
+
+        let rs: &StandardRuntimeServices<'_> =
+            runtime_services!(get_next_variable_name = mock_efi_get_next_variable_name);
+
+        let status = rs.get_next_variable_name(&DUMMY_NAME, &DUMMY_NAMESPACE);
+
+        assert!(status.is_ok());
+
+        let (next_name, next_guid) = status.unwrap();
+
+        assert_eq!(next_name, DUMMY_NEXT_NAME);
+        assert_eq!(next_guid, DUMMY_NEXT_NAMESPACE);
+    }
+
+    #[test]
+    fn test_get_next_variable_name_non_terminated() {
+        let rs: &StandardRuntimeServices<'_> =
+            runtime_services!(get_next_variable_name = mock_efi_get_next_variable_name);
+
+        let status = rs.get_next_variable_name(&DUMMY_NON_NULL_TERMINATED_NAME, &DUMMY_NAMESPACE);
+
+        assert!(status.is_err());
+        assert_eq!(status.unwrap_err(), efi::Status::INVALID_PARAMETER);
+    }
+
+    #[test]
+    #[should_panic(expected = "Zero-length name passed into get_next_variable_name.")]
+    fn test_get_next_variable_name_zero_length_name() {
+        let rs: &StandardRuntimeServices<'_> =
+            runtime_services!(get_next_variable_name = mock_efi_get_next_variable_name);
+
+        let _ = rs.get_next_variable_name(&DUMMY_ZERO_LENGTH_NAME, &DUMMY_NAMESPACE);
+    }
+
+    #[test]
+    fn test_get_next_variable_name_not_found() {
+        let rs: &StandardRuntimeServices<'_> =
+            runtime_services!(get_next_variable_name = mock_efi_get_next_variable_name);
+
+        let status = rs.get_next_variable_name(&DUMMY_UNKNOWN_NAME, &DUMMY_NAMESPACE);
+
+        assert!(status.is_err());
+        assert_eq!(status.unwrap_err(), efi::Status::NOT_FOUND);
+    }
+
+    #[test]
+    fn test_query_variable_info() {
+        let rs: &StandardRuntimeServices<'_> = runtime_services!(query_variable_info = mock_efi_query_variable_info);
+
+        let status = rs.query_variable_info(DUMMY_ATTRIBUTES);
+
+        assert!(status.is_ok());
+        let variable_info = status.unwrap();
+        assert_eq!(variable_info.maximum_variable_storage_size, DUMMY_MAXIMUM_VARIABLE_STORAGE_SIZE);
+        assert_eq!(variable_info.remaining_variable_storage_size, DUMMY_REMAINING_VARIABLE_STORAGE_SIZE);
+        assert_eq!(variable_info.maximum_variable_size, DUMMY_MAXIMUM_VARIABLE_SIZE);
+    }
+
+    #[test]
+    fn test_query_variable_info_invalid_attributes() {
+        let rs: &StandardRuntimeServices<'_> = runtime_services!(query_variable_info = mock_efi_query_variable_info);
+
+        let status = rs.query_variable_info(DUMMY_INVALID_ATTRIBUTES);
+
+        assert!(status.is_err());
+        assert_eq!(status.unwrap_err(), efi::Status::INVALID_PARAMETER);
     }
 }
