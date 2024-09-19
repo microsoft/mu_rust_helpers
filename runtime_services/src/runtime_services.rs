@@ -178,7 +178,7 @@ pub trait RuntimeServices: Sized {
         unsafe { self.get_next_variable_name_unchecked(prev_name, prev_namespace) }
     }
 
-    unsafe fn query_variable_info(&self, attributes: u32) -> Result<VariableInfo, efi::Status> {
+    fn query_variable_info(&self, attributes: u32) -> Result<VariableInfo, efi::Status> {
         unsafe { self.query_variable_info_unchecked(attributes) }
     }
 
@@ -293,7 +293,8 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
 
         let mut first_try: bool = true;
         loop {
-            let status = get_next_variable_name(ptr::addr_of_mut!(name_size), name.as_mut_ptr(), ptr::addr_of_mut!(namespace));
+            let status =
+                get_next_variable_name(ptr::addr_of_mut!(name_size), name.as_mut_ptr(), ptr::addr_of_mut!(namespace));
 
             if status == efi::Status::BUFFER_TOO_SMALL && first_try {
                 first_try = false;
@@ -306,7 +307,7 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
 
                 namespace = *prev_namespace;
             } else if status.is_error() {
-                return Err(status)
+                return Err(status);
             } else {
                 name.truncate(
                     name.iter()
@@ -398,8 +399,14 @@ mod test {
     const DUMMY_NEXT_NAMESPACE: efi::Guid = efi::Guid::from_fields(1, 0, 0, 0, 0, &DUMMY_NODE);
 
     const DUMMY_ATTRIBUTES: u32 = 0x1234;
+    const DUMMY_INVALID_ATTRIBUTES: u32 = 0x2345;
+
     const DUMMY_DATA: u32 = 0xDEADBEEF;
     const DUMMY_DATA_REPR_SIZE: usize = mem::size_of::<u32>();
+
+    const DUMMY_MAXIMUM_VARIABLE_STORAGE_SIZE: u64 = 0x11111111_11111111;
+    const DUMMY_REMAINING_VARIABLE_STORAGE_SIZE: u64 = 0x22222222_22222222;
+    const DUMMY_MAXIMUM_VARIABLE_SIZE: u64 = 0x33333333_33333333;
 
     #[derive(Debug)]
     struct DummyVariableType {
@@ -434,7 +441,7 @@ mod test {
                 return efi::Status::NOT_FOUND;
             }
 
-            // Since it's not DUMMY_UNKNOWN_NAME, we're assuming DUMMY_NAME was passed in
+            // Since name isn't DUMMY_UNKNOWN_NAME, we're assuming DUMMY_NAME was passed in.
             // If name is not equal to DUMMY_NAME, then something must have gone wrong.
             assert_eq!(
                 DUMMY_NAME.iter().enumerate().all(|(i, &c)| *name.offset(i as isize) == c),
@@ -455,7 +462,7 @@ mod test {
             *(data as *mut u32) = DUMMY_DATA;
         }
 
-        return efi::Status::SUCCESS;
+        efi::Status::SUCCESS
     }
 
     extern "efiapi" fn mock_efi_set_variable(
@@ -475,7 +482,7 @@ mod test {
                 return efi::Status::NOT_FOUND;
             }
 
-            // Since it's not DUMMY_UNKNOWN_NAME, we're assuming DUMMY_NAME was passed in
+            // Since name isn't DUMMY_UNKNOWN_NAME, we're assuming DUMMY_NAME was passed in.
             // If name is not equal to DUMMY_NAME, then something must have gone wrong.
             assert_eq!(
                 DUMMY_NAME.iter().enumerate().all(|(i, &c)| *name.offset(i as isize) == c),
@@ -489,7 +496,7 @@ mod test {
             assert_eq!(*(data as *mut u32), DUMMY_DATA);
         }
 
-        return efi::Status::SUCCESS;
+        efi::Status::SUCCESS
     }
 
     extern "efiapi" fn mock_efi_get_next_variable_name(
@@ -508,7 +515,7 @@ mod test {
                 return efi::Status::NOT_FOUND;
             }
 
-            // Since it's not DUMMY_UNKNOWN_NAME, we're assuming DUMMY_NAME was passed in
+            // Since name isn't DUMMY_UNKNOWN_NAME, we're assuming DUMMY_NAME was passed in.
             // If name is not equal to DUMMY_NAME, then something must have gone wrong.
             assert_eq!(
                 DUMMY_NAME.iter().enumerate().all(|(i, &c)| *name.offset(i as isize) == c),
@@ -527,7 +534,30 @@ mod test {
             *namespace = DUMMY_NEXT_NAMESPACE;
         }
 
-        return efi::Status::SUCCESS;
+        efi::Status::SUCCESS
+    }
+
+    extern "efiapi" fn mock_efi_query_variable_info(
+        attributes: u32,
+        maximum_variable_storage_size: *mut u64,
+        remaining_variable_storage_size: *mut u64,
+        maximum_variable_size: *mut u64,
+    ) -> efi::Status {
+        if attributes == DUMMY_INVALID_ATTRIBUTES {
+            return efi::Status::INVALID_PARAMETER;
+        }
+
+        // Since attributes isn't DUMMY_INVALID_ATTRIBUTES, we're assuming DUMMY_ATTRIBUTES was passed in.
+        // If attributes is not equal to DUMMY_ATTRIBUTES, then something must have gone wrong.
+        assert_eq!(attributes, DUMMY_ATTRIBUTES);
+
+        unsafe {
+            *maximum_variable_storage_size = DUMMY_MAXIMUM_VARIABLE_STORAGE_SIZE;
+            *remaining_variable_storage_size = DUMMY_REMAINING_VARIABLE_STORAGE_SIZE;
+            *maximum_variable_size = DUMMY_MAXIMUM_VARIABLE_SIZE;
+        }
+
+        efi::Status::SUCCESS
     }
 
     #[test]
@@ -629,7 +659,8 @@ mod test {
 
         let mut data = DummyVariableType { value: DUMMY_DATA };
 
-        let status = rs.set_variable::<DummyVariableType>(&DUMMY_UNKNOWN_NAME, &DUMMY_NAMESPACE, DUMMY_ATTRIBUTES, &mut data);
+        let status =
+            rs.set_variable::<DummyVariableType>(&DUMMY_UNKNOWN_NAME, &DUMMY_NAMESPACE, DUMMY_ATTRIBUTES, &mut data);
 
         assert!(status.is_err());
         assert_eq!(status.unwrap_err(), efi::Status::NOT_FOUND);
@@ -684,4 +715,26 @@ mod test {
         assert_eq!(status.unwrap_err(), efi::Status::NOT_FOUND);
     }
 
+    #[test]
+    fn test_query_variable_info() {
+        let rs: &StandardRuntimeServices<'_> = runtime_services!(query_variable_info = mock_efi_query_variable_info);
+
+        let status = rs.query_variable_info(DUMMY_ATTRIBUTES);
+
+        assert!(status.is_ok());
+        let variable_info = status.unwrap();
+        assert_eq!(variable_info.maximum_variable_storage_size, DUMMY_MAXIMUM_VARIABLE_STORAGE_SIZE);
+        assert_eq!(variable_info.remaining_variable_storage_size, DUMMY_REMAINING_VARIABLE_STORAGE_SIZE);
+        assert_eq!(variable_info.maximum_variable_size, DUMMY_MAXIMUM_VARIABLE_SIZE);
+    }
+
+    #[test]
+    fn test_query_variable_info_invalid_attributes() {
+        let rs: &StandardRuntimeServices<'_> = runtime_services!(query_variable_info = mock_efi_query_variable_info);
+
+        let status = rs.query_variable_info(DUMMY_INVALID_ATTRIBUTES);
+
+        assert!(status.is_err());
+        assert_eq!(status.unwrap_err(), efi::Status::INVALID_PARAMETER);
+    }
 }
