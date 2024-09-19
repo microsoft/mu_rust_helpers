@@ -271,6 +271,7 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
         GetVariableStatus::Success { data_size: data_size, attributes: attributes }
     }
 
+    // Note: Unlike get_variable, a non-null terminated name will return INVALID_PARAMETER per UEFI spec
     unsafe fn get_next_variable_name_unchecked(
         &self,
         prev_name: &[u16],
@@ -281,8 +282,8 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
             panic!("GetNextVariableName has not initialized in the Runtime Services Table.")
         }
 
-        if !prev_name.iter().position(|&c| c == 0).is_some() {
-            panic!("Name passed into get_next_variable_name is not null-terminated.");
+        if prev_name.len() == 0 {
+            panic!("Zero-length name passed into get_next_variable_name.");
         }
 
         let mut name = prev_name.to_vec();
@@ -292,28 +293,29 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
 
         let mut first_try: bool = true;
         loop {
-            match get_next_variable_name(ptr::addr_of_mut!(name_size), name.as_mut_ptr(), ptr::addr_of_mut!(namespace))
-            {
-                efi::Status::BUFFER_TOO_SMALL if first_try => {
-                    first_try = false;
+            let status = get_next_variable_name(ptr::addr_of_mut!(name_size), name.as_mut_ptr(), ptr::addr_of_mut!(namespace));
 
-                    name.reserve(name_size - name.len());
+            if status == efi::Status::BUFFER_TOO_SMALL && first_try {
+                first_try = false;
 
-                    // Reset fields which may have been overwritten
-                    name_size = name.len();
+                assert!(name_size > name.len(), "get_next_variable_name requested smaller buffer.");
+                name.resize(name_size, 0);
 
-                    name.clear();
-                    name.extend_from_slice(prev_name);
+                // Reset fields which may have been overwritten
+                name.splice(0..prev_name.len(), prev_name.iter().cloned());
 
-                    namespace = *prev_namespace;
-                }
-                e if e.is_error() => return Err(e),
-                _ => {
-                    // Shorten name to include up to first null byte
-                    name.truncate(name.iter().position(|&c| c == 0).unwrap() + 1);
+                namespace = *prev_namespace;
+            } else if status.is_error() {
+                return Err(status)
+            } else {
+                name.truncate(
+                    name.iter()
+                        .position(|&c| c == 0)
+                        .expect("Name returned by get_next_variable_name is not null-terminated.")
+                        + 1,
+                );
 
-                    return Ok((name, namespace));
-                }
+                return Ok((name, namespace));
             }
         }
     }
@@ -384,12 +386,15 @@ mod test {
         rs.initialize(efi_rs);
     }
 
-    const DUMMY_NULL_TERMINATED_NAME: [u16; 3] = [0x1000, 0x1020, 0x0000];
+    const DUMMY_NAME: [u16; 3] = [0x1000, 0x1020, 0x0000];
     const DUMMY_NON_NULL_TERMINATED_NAME: [u16; 3] = [0x1000, 0x1020, 0x1040];
     const DUMMY_EMPTY_NAME: [u16; 1] = [0x0000];
+    const DUMMY_ZERO_LENGTH_NAME: [u16; 0] = [];
+    const DUMMY_NEXT_NAME: [u16; 5] = [0x1001, 0x1022, 0x1043, 0x1064, 0x0000];
 
     const DUMMY_NODE: [u8; 6] = [0x0, 0x0, 0x0, 0x0, 0x0, 0x0];
     const DUMMY_NAMESPACE: efi::Guid = efi::Guid::from_fields(0, 0, 0, 0, 0, &DUMMY_NODE);
+    const DUMMY_NEXT_NAMESPACE: efi::Guid = efi::Guid::from_fields(1, 0, 0, 0, 0, &DUMMY_NODE);
 
     const DUMMY_ATTRIBUTES: u32 = 0x1234;
     const DUMMY_DATA: u32 = 0xDEADBEEF;
@@ -425,7 +430,7 @@ mod test {
     ) -> efi::Status {
         unsafe {
             assert_eq!(
-                DUMMY_NULL_TERMINATED_NAME.iter().enumerate().all(|(i, &c)| *name.offset(i as isize) == c),
+                DUMMY_NAME.iter().enumerate().all(|(i, &c)| *name.offset(i as isize) == c),
                 true,
                 "Variable name does not match expected."
             );
@@ -446,11 +451,71 @@ mod test {
         return efi::Status::SUCCESS;
     }
 
+    extern "efiapi" fn mock_efi_set_variable(
+        name: *mut u16,
+        namespace: *mut efi::Guid,
+        attributes: u32,
+        data_size: usize,
+        data: *mut c_void,
+    ) -> efi::Status {
+        unsafe {
+            // Invalid parameter is returned if name is empty (first character is 0)
+            if *name == 0 {
+                return efi::Status::INVALID_PARAMETER;
+            }
+
+            assert_eq!(
+                DUMMY_NAME.iter().enumerate().all(|(i, &c)| *name.offset(i as isize) == c),
+                true,
+                "Variable name does not match expected."
+            );
+
+            assert_eq!(*namespace, DUMMY_NAMESPACE);
+            assert_eq!(attributes, DUMMY_ATTRIBUTES);
+            assert_eq!(data_size, DUMMY_DATA_REPR_SIZE);
+            assert_eq!(*(data as *mut u32), DUMMY_DATA);
+        }
+
+        return efi::Status::SUCCESS;
+    }
+
+    extern "efiapi" fn mock_efi_get_next_variable_name(
+        name_size: *mut usize,
+        name: *mut u16,
+        namespace: *mut efi::Guid,
+    ) -> efi::Status {
+        // Ensure the name and namespace are as expected
+        unsafe {
+            // Return invalid parameter if the name isn't null-terminated per UEFI spec
+            if !slice::from_raw_parts(name, *name_size).iter().position(|&c| c == 0).is_some() {
+                return efi::Status::INVALID_PARAMETER;
+            }
+
+            assert_eq!(
+                DUMMY_NAME.iter().enumerate().all(|(i, &c)| *name.offset(i as isize) == c),
+                true,
+                "Variable name does not match expected."
+            );
+            assert_eq!(*namespace, DUMMY_NAMESPACE);
+
+            if *name_size < DUMMY_NEXT_NAME.len() {
+                *name_size = DUMMY_NEXT_NAME.len();
+                return efi::Status::BUFFER_TOO_SMALL;
+            }
+
+            *name_size = DUMMY_NEXT_NAME.len();
+            ptr::copy_nonoverlapping(DUMMY_NEXT_NAME.as_ptr(), name, DUMMY_NEXT_NAME.len());
+            *namespace = DUMMY_NEXT_NAMESPACE;
+        }
+
+        return efi::Status::SUCCESS;
+    }
+
     #[test]
     fn test_get_variable() {
         let rs: &StandardRuntimeServices<'_> = runtime_services!(get_variable = mock_efi_get_variable);
 
-        let status = rs.get_variable::<DummyVariableType>(&DUMMY_NULL_TERMINATED_NAME, &DUMMY_NAMESPACE, None);
+        let status = rs.get_variable::<DummyVariableType>(&DUMMY_NAME, &DUMMY_NAMESPACE, None);
 
         assert!(status.is_ok());
         let (data, attributes) = status.unwrap();
@@ -470,7 +535,7 @@ mod test {
     fn test_get_variable_low_size_hint() {
         let rs: &StandardRuntimeServices<'_> = runtime_services!(get_variable = mock_efi_get_variable);
 
-        let status = rs.get_variable::<DummyVariableType>(&DUMMY_NULL_TERMINATED_NAME, &DUMMY_NAMESPACE, Some(1));
+        let status = rs.get_variable::<DummyVariableType>(&DUMMY_NAME, &DUMMY_NAMESPACE, Some(1));
 
         assert!(status.is_ok());
         let (data, attributes) = status.unwrap();
@@ -489,10 +554,10 @@ mod test {
             _data_size: *mut usize,
             _data: *mut c_void,
         ) -> efi::Status {
-            return efi::Status::NOT_FOUND;
+            efi::Status::NOT_FOUND
         }
 
-        let status = rs.get_variable::<DummyVariableType>(&DUMMY_NULL_TERMINATED_NAME, &DUMMY_NAMESPACE, Some(1));
+        let status = rs.get_variable::<DummyVariableType>(&DUMMY_NAME, &DUMMY_NAMESPACE, Some(1));
 
         assert!(status.is_err());
         assert_eq!(status.unwrap_err(), efi::Status::NOT_FOUND);
@@ -502,40 +567,12 @@ mod test {
     fn test_get_variable_size_and_attributes() {
         let rs: &StandardRuntimeServices<'_> = runtime_services!(get_variable = mock_efi_get_variable);
 
-        let status = rs.get_variable_size_and_attributes(&DUMMY_NULL_TERMINATED_NAME, &DUMMY_NAMESPACE);
+        let status = rs.get_variable_size_and_attributes(&DUMMY_NAME, &DUMMY_NAMESPACE);
 
         assert!(status.is_ok());
         let (size, attributes) = status.unwrap();
         assert_eq!(size, DUMMY_DATA_REPR_SIZE);
         assert_eq!(attributes, DUMMY_ATTRIBUTES);
-    }
-
-    extern "efiapi" fn mock_efi_set_variable(
-        name: *mut u16,
-        namespace: *mut efi::Guid,
-        attributes: u32,
-        data_size: usize,
-        data: *mut c_void,
-    ) -> efi::Status {
-        unsafe {
-            // Invalid parameter is returned if name is empty (first character is 0)
-            if *name == 0 {
-                return efi::Status::INVALID_PARAMETER;
-            }
-
-            assert_eq!(
-                DUMMY_NULL_TERMINATED_NAME.iter().enumerate().all(|(i, &c)| *name.offset(i as isize) == c),
-                true,
-                "Variable name does not match expected."
-            );
-
-            assert_eq!(*namespace, DUMMY_NAMESPACE);
-            assert_eq!(attributes, DUMMY_ATTRIBUTES);
-            assert_eq!(data_size, DUMMY_DATA_REPR_SIZE);
-            assert_eq!(*(data as *mut u32), DUMMY_DATA);
-        }
-
-        return efi::Status::SUCCESS;
     }
 
     #[test]
@@ -544,12 +581,7 @@ mod test {
 
         let mut data = DummyVariableType { value: DUMMY_DATA };
 
-        let status = rs.set_variable::<DummyVariableType>(
-            &DUMMY_NULL_TERMINATED_NAME,
-            &DUMMY_NAMESPACE,
-            DUMMY_ATTRIBUTES,
-            &mut data,
-        );
+        let status = rs.set_variable::<DummyVariableType>(&DUMMY_NAME, &DUMMY_NAMESPACE, DUMMY_ATTRIBUTES, &mut data);
 
         assert!(status.is_ok());
     }
@@ -581,4 +613,84 @@ mod test {
         assert!(status.is_err());
         assert_eq!(status.unwrap_err(), efi::Status::INVALID_PARAMETER);
     }
+
+    #[test]
+    fn test_set_variable_not_found() {
+        let rs: &StandardRuntimeServices<'_> = runtime_services!(set_variable = mock_efi_set_variable_not_found);
+
+        extern "efiapi" fn mock_efi_set_variable_not_found(
+            _name: *mut u16,
+            _namespace: *mut efi::Guid,
+            _attributes: u32,
+            _data_size: usize,
+            _data: *mut c_void,
+        ) -> efi::Status {
+            efi::Status::NOT_FOUND
+        }
+
+        let mut data = DummyVariableType { value: DUMMY_DATA };
+
+        let status = rs.set_variable::<DummyVariableType>(&DUMMY_NAME, &DUMMY_NAMESPACE, DUMMY_ATTRIBUTES, &mut data);
+
+        assert!(status.is_err());
+        assert_eq!(status.unwrap_err(), efi::Status::NOT_FOUND);
+    }
+
+    #[test]
+    fn test_get_next_variable_name() {
+        // Ensure we are testing a growing name buffer
+        assert!(DUMMY_NEXT_NAME.len() > DUMMY_NAME.len());
+
+        let rs: &StandardRuntimeServices<'_> =
+            runtime_services!(get_next_variable_name = mock_efi_get_next_variable_name);
+
+        let status = rs.get_next_variable_name(&DUMMY_NAME, &DUMMY_NAMESPACE);
+
+        assert!(status.is_ok());
+
+        let (next_name, next_guid) = status.unwrap();
+
+        assert_eq!(next_name, DUMMY_NEXT_NAME);
+        assert_eq!(next_guid, DUMMY_NEXT_NAMESPACE);
+    }
+
+    #[test]
+    fn test_get_next_variable_name_non_terminated() {
+        let rs: &StandardRuntimeServices<'_> =
+            runtime_services!(get_next_variable_name = mock_efi_get_next_variable_name);
+
+        let status = rs.get_next_variable_name(&DUMMY_NON_NULL_TERMINATED_NAME, &DUMMY_NAMESPACE);
+
+        assert!(status.is_err());
+        assert_eq!(status.unwrap_err(), efi::Status::INVALID_PARAMETER);
+    }
+
+    #[test]
+    #[should_panic(expected = "Zero-length name passed into get_next_variable_name.")]
+    fn test_get_next_variable_name_zero_length_name() {
+        let rs: &StandardRuntimeServices<'_> =
+            runtime_services!(get_next_variable_name = mock_efi_get_next_variable_name);
+
+        let _ = rs.get_next_variable_name(&DUMMY_ZERO_LENGTH_NAME, &DUMMY_NAMESPACE);
+    }
+
+    #[test]
+    fn test_get_next_variable_name_not_found() {
+        let rs: &StandardRuntimeServices<'_> =
+            runtime_services!(get_next_variable_name = mock_efi_get_next_variable_name_not_found);
+
+        extern "efiapi" fn mock_efi_get_next_variable_name_not_found(
+            _name_size: *mut usize,
+            _name: *mut u16,
+            _namespace: *mut efi::Guid,
+        ) -> efi::Status {
+           efi::Status::NOT_FOUND
+        }
+
+        let status = rs.get_next_variable_name(&DUMMY_NAME, &DUMMY_NAMESPACE);
+
+        assert!(status.is_err());
+        assert_eq!(status.unwrap_err(), efi::Status::NOT_FOUND);
+    }
+
 }
