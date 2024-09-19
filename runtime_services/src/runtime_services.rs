@@ -391,6 +391,7 @@ mod test {
     const DUMMY_EMPTY_NAME: [u16; 1] = [0x0000];
     const DUMMY_ZERO_LENGTH_NAME: [u16; 0] = [];
     const DUMMY_NEXT_NAME: [u16; 5] = [0x1001, 0x1022, 0x1043, 0x1064, 0x0000];
+    const DUMMY_UNKNOWN_NAME: [u16; 3] = [0x2000, 0x2020, 0x0000];
 
     const DUMMY_NODE: [u8; 6] = [0x0, 0x0, 0x0, 0x0, 0x0, 0x0];
     const DUMMY_NAMESPACE: efi::Guid = efi::Guid::from_fields(0, 0, 0, 0, 0, &DUMMY_NODE);
@@ -429,6 +430,12 @@ mod test {
         data: *mut c_void,
     ) -> efi::Status {
         unsafe {
+            if DUMMY_UNKNOWN_NAME.iter().enumerate().all(|(i, &c)| *name.offset(i as isize) == c) {
+                return efi::Status::NOT_FOUND;
+            }
+
+            // Since it's not DUMMY_UNKNOWN_NAME, we're assuming DUMMY_NAME was passed in
+            // If name is not equal to DUMMY_NAME, then something must have gone wrong.
             assert_eq!(
                 DUMMY_NAME.iter().enumerate().all(|(i, &c)| *name.offset(i as isize) == c),
                 true,
@@ -464,6 +471,12 @@ mod test {
                 return efi::Status::INVALID_PARAMETER;
             }
 
+            if DUMMY_UNKNOWN_NAME.iter().enumerate().all(|(i, &c)| *name.offset(i as isize) == c) {
+                return efi::Status::NOT_FOUND;
+            }
+
+            // Since it's not DUMMY_UNKNOWN_NAME, we're assuming DUMMY_NAME was passed in
+            // If name is not equal to DUMMY_NAME, then something must have gone wrong.
             assert_eq!(
                 DUMMY_NAME.iter().enumerate().all(|(i, &c)| *name.offset(i as isize) == c),
                 true,
@@ -491,6 +504,12 @@ mod test {
                 return efi::Status::INVALID_PARAMETER;
             }
 
+            if DUMMY_UNKNOWN_NAME.iter().enumerate().all(|(i, &c)| *name.offset(i as isize) == c) {
+                return efi::Status::NOT_FOUND;
+            }
+
+            // Since it's not DUMMY_UNKNOWN_NAME, we're assuming DUMMY_NAME was passed in
+            // If name is not equal to DUMMY_NAME, then something must have gone wrong.
             assert_eq!(
                 DUMMY_NAME.iter().enumerate().all(|(i, &c)| *name.offset(i as isize) == c),
                 true,
@@ -545,19 +564,9 @@ mod test {
 
     #[test]
     fn test_get_variable_not_found() {
-        let rs: &StandardRuntimeServices<'_> = runtime_services!(get_variable = mock_efi_get_variable_not_found);
+        let rs: &StandardRuntimeServices<'_> = runtime_services!(get_variable = mock_efi_get_variable);
 
-        extern "efiapi" fn mock_efi_get_variable_not_found(
-            _name: *mut u16,
-            _namespace: *mut efi::Guid,
-            _attributes: *mut u32,
-            _data_size: *mut usize,
-            _data: *mut c_void,
-        ) -> efi::Status {
-            efi::Status::NOT_FOUND
-        }
-
-        let status = rs.get_variable::<DummyVariableType>(&DUMMY_NAME, &DUMMY_NAMESPACE, Some(1));
+        let status = rs.get_variable::<DummyVariableType>(&DUMMY_UNKNOWN_NAME, &DUMMY_NAMESPACE, Some(1));
 
         assert!(status.is_err());
         assert_eq!(status.unwrap_err(), efi::Status::NOT_FOUND);
@@ -616,21 +625,11 @@ mod test {
 
     #[test]
     fn test_set_variable_not_found() {
-        let rs: &StandardRuntimeServices<'_> = runtime_services!(set_variable = mock_efi_set_variable_not_found);
-
-        extern "efiapi" fn mock_efi_set_variable_not_found(
-            _name: *mut u16,
-            _namespace: *mut efi::Guid,
-            _attributes: u32,
-            _data_size: usize,
-            _data: *mut c_void,
-        ) -> efi::Status {
-            efi::Status::NOT_FOUND
-        }
+        let rs: &StandardRuntimeServices<'_> = runtime_services!(set_variable = mock_efi_set_variable);
 
         let mut data = DummyVariableType { value: DUMMY_DATA };
 
-        let status = rs.set_variable::<DummyVariableType>(&DUMMY_NAME, &DUMMY_NAMESPACE, DUMMY_ATTRIBUTES, &mut data);
+        let status = rs.set_variable::<DummyVariableType>(&DUMMY_UNKNOWN_NAME, &DUMMY_NAMESPACE, DUMMY_ATTRIBUTES, &mut data);
 
         assert!(status.is_err());
         assert_eq!(status.unwrap_err(), efi::Status::NOT_FOUND);
@@ -677,17 +676,9 @@ mod test {
     #[test]
     fn test_get_next_variable_name_not_found() {
         let rs: &StandardRuntimeServices<'_> =
-            runtime_services!(get_next_variable_name = mock_efi_get_next_variable_name_not_found);
+            runtime_services!(get_next_variable_name = mock_efi_get_next_variable_name);
 
-        extern "efiapi" fn mock_efi_get_next_variable_name_not_found(
-            _name_size: *mut usize,
-            _name: *mut u16,
-            _namespace: *mut efi::Guid,
-        ) -> efi::Status {
-           efi::Status::NOT_FOUND
-        }
-
-        let status = rs.get_next_variable_name(&DUMMY_NAME, &DUMMY_NAMESPACE);
+        let status = rs.get_next_variable_name(&DUMMY_UNKNOWN_NAME, &DUMMY_NAMESPACE);
 
         assert!(status.is_err());
         assert_eq!(status.unwrap_err(), efi::Status::NOT_FOUND);
