@@ -91,10 +91,7 @@ unsafe impl Send for StandardBootServices<'static> {}
 pub trait BootServices: Sized {
     /// Create an event.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-createevent" target="_blank">
-    ///   7.1.1. EFI_BOOT_SERVICES.CreateEvent()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.1.1. EFI_BOOT_SERVICES.CreateEvent()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-createevent)
     fn create_event<T>(
         &self,
         event_type: EventType,
@@ -128,10 +125,7 @@ pub trait BootServices: Sized {
     /// * You must enforce Rust’s borrowing[^borrowing rules] rules rules.
     ///
     /// [^borrowing rules]:
-    /// Rust By Example Book:
-    /// <a href="https://doc.rust-lang.org/beta/rust-by-example/scope/borrow.html" target="_blank">
-    ///   15.3. Borrowing
-    /// </a>
+    /// [Rust By Example Book: 15.3. Borrowing](https://doc.rust-lang.org/beta/rust-by-example/scope/borrow.html)
     unsafe fn create_event_unchecked<T: Sized + 'static>(
         &self,
         event_type: EventType,
@@ -142,10 +136,7 @@ pub trait BootServices: Sized {
 
     /// Create an event in a group.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-createeventex" target="_blank">
-    ///   7.1.2. EFI_BOOT_SERVICES.CreateEventEx()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.1.2. EFI_BOOT_SERVICES.CreateEventEx()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-createeventex)
     fn create_event_ex<T>(
         &self,
         event_type: EventType,
@@ -186,44 +177,29 @@ pub trait BootServices: Sized {
 
     /// Close an event.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-closeevent" target="_blank">
-    ///   7.1.3. EFI_BOOT_SERVICES.CloseEvent()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.1.3. EFI_BOOT_SERVICES.CloseEvent()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-closeevent)
     ///
     /// [^note]: It is safe to call *close_event* in the notify function.
     fn close_event(&self, event: efi::Event) -> Result<(), efi::Status>;
 
     /// Signals an event.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-signalevent" target="_blank">
-    ///   7.1.4. EFI_BOOT_SERVICES.SignalEvent()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.1.4. EFI_BOOT_SERVICES.SignalEvent()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-signalevent)
     fn signal_event(&self, event: efi::Event) -> Result<(), efi::Status>;
 
     /// Stops execution until an event is signaled.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-waitforevent" target="_blank">
-    ///   7.1.5. EFI_BOOT_SERVICES.WaitForEvent()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.1.5. EFI_BOOT_SERVICES.WaitForEvent()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-waitforevent)
     fn wait_for_event(&self, events: &mut [efi::Event]) -> Result<usize, efi::Status>;
 
     /// Checks whether an event is in the signaled state.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-checkevent" target="_blank">
-    ///   7.1.6. EFI_BOOT_SERVICES.CheckEvent()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.1.6. EFI_BOOT_SERVICES.CheckEvent()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-checkevent)
     fn check_event(&self, event: efi::Event) -> Result<(), efi::Status>;
 
     /// Sets the type of timer and the trigger time for a timer event.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-settimer" target="_blank">
-    ///   7.1.7. EFI_BOOT_SERVICES.SetTimer()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.1.7. EFI_BOOT_SERVICES.SetTimer()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-settimer)
     fn set_timer(&self, event: efi::Event, timer_type: EventTimerType, trigger_time: u64) -> Result<(), efi::Status>;
 
     /// Raises a task's priority level and returns a [`TplGuard`] that will restore the tpl when dropped.
@@ -235,26 +211,17 @@ pub trait BootServices: Sized {
 
     /// Raises a task’s priority level and returns its previous level.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-raisetpl" target="_blank">
-    ///   7.1.8. EFI_BOOT_SERVICES.RaiseTPL()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.1.8. EFI_BOOT_SERVICES.RaiseTPL()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-raisetpl)
     fn raise_tpl(&self, tpl: Tpl) -> Tpl;
 
     /// Restores a task’s priority level to its previous value.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-restoretpl" target="_blank">
-    ///   7.1.9. EFI_BOOT_SERVICES.RestoreTPL()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.1.9. EFI_BOOT_SERVICES.RestoreTPL()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-restoretpl)
     fn restore_tpl(&self, tpl: Tpl);
 
     /// Allocates memory pages from the system.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-allocatepages" target="_blank">
-    ///   7.2.1. EFI_BOOT_SERVICES.AllocatePages()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.2.1. EFI_BOOT_SERVICES.AllocatePages()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-allocatepages)
     fn allocate_pages(
         &self,
         alloc_type: AllocType,
@@ -264,26 +231,17 @@ pub trait BootServices: Sized {
 
     /// Frees memory pages.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-freepages" target="_blank">
-    /// 7.2.2. EFI_BOOT_SERVICES.FreePages()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.2.2. EFI_BOOT_SERVICES.FreePages()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-freepages)
     fn free_pages(&self, address: usize, nb_pages: usize) -> Result<(), efi::Status>;
 
     /// Returns the current memory map.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-getmemorymap" target="_blank">
-    /// 7.2.3. EFI_BOOT_SERVICES.GetMemoryMap()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.2.3. EFI_BOOT_SERVICES.GetMemoryMap()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-getmemorymap)
     fn get_memory_map<'a>(&'a self) -> Result<MemoryMap<'a, Self>, (efi::Status, usize)>;
 
     /// Allocates pool memory.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-allocatepool" target="_blank">
-    /// 7.2.4. EFI_BOOT_SERVICES.AllocatePool()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.2.4. EFI_BOOT_SERVICES.AllocatePool()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-allocatepool)
     fn allocate_pool(&self, pool_type: MemoryType, size: usize) -> Result<*mut u8, efi::Status>;
 
     /// Allocates pool memory casted as given type.
@@ -294,19 +252,13 @@ pub trait BootServices: Sized {
 
     /// Returns pool memory to the system.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-freepool" target="_blank">
-    /// 7.2.5. EFI_BOOT_SERVICES.FreePool()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.2.5. EFI_BOOT_SERVICES.FreePool()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-freepool)
     fn free_pool(&self, buffer: *mut u8) -> Result<(), efi::Status>;
 
     /// Installs a protocol interface on a device handle.
     /// If the handle does not exist, it is created and added to the list of handles in the system.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-installprotocolinterface" target="_blank">
-    /// 7.3.2. EFI_BOOT_SERVICES.InstallProtocolInterface()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.3.2. EFI_BOOT_SERVICES.InstallProtocolInterface()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-installprotocolinterface)
     fn install_protocol_interface<P: Protocol<Interface = I> + 'static, I: Any + 'static>(
         &self,
         handle: Option<efi::Handle>,
@@ -336,10 +288,7 @@ pub trait BootServices: Sized {
 
     /// Removes a protocol interface from a device handle.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-uninstallprotocolinterface" target="_blank">
-    /// 7.3.3. EFI_BOOT_SERVICES.UninstallProtocolInterface()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.3.3. EFI_BOOT_SERVICES.UninstallProtocolInterface()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-uninstallprotocolinterface)
     fn uninstall_protocol_interface<P: Protocol<Interface = I> + 'static, I: Any + 'static>(
         &self,
         handle: efi::Handle,
@@ -367,10 +316,7 @@ pub trait BootServices: Sized {
 
     /// Reinstalls a protocol interface on a device handle.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-reinstallprotocolinterface" target="_blank">
-    /// 7.3.4. EFI_BOOT_SERVICES.ReinstallProtocolInterface()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.3.4. EFI_BOOT_SERVICES.ReinstallProtocolInterface()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-reinstallprotocolinterface)
     fn reinstall_protocol_interface<P: Protocol<Interface = I> + 'static, I: 'static>(
         &self,
         handle: efi::Handle,
@@ -413,10 +359,7 @@ pub trait BootServices: Sized {
 
     /// Creates an event that is to be signaled whenever an interface is installed for a specified protocol.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-registerprotocolnotify" target="_blank">
-    /// 7.3.5. EFI_BOOT_SERVICES.RegisterProtocolNotify()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.3.5. EFI_BOOT_SERVICES.RegisterProtocolNotify()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-registerprotocolnotify)
     fn register_protocol_notify(
         &self,
         protocol: &'static efi::Guid,
@@ -425,10 +368,7 @@ pub trait BootServices: Sized {
 
     /// Returns an array of handles that support a specified protocol.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-locatehandle" target="_blank">
-    /// 7.3.6. EFI_BOOT_SERVICES.LocateHandle()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.3.6. EFI_BOOT_SERVICES.LocateHandle()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-locatehandle)
     fn locate_handle<'a>(
         &'a self,
         search_type: HandleSearchType,
@@ -436,10 +376,7 @@ pub trait BootServices: Sized {
 
     /// Queries a handle to determine if it supports a specified protocol.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-handleprotocol" target="_blank">
-    /// 7.3.7. EFI_BOOT_SERVICES.HandleProtocol()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.3.7. EFI_BOOT_SERVICES.HandleProtocol()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-handleprotocol)
     fn handle_protocol<P: Protocol<Interface = I> + 'static, I: 'static>(
         &self,
         handle: efi::Handle,
@@ -465,11 +402,7 @@ pub trait BootServices: Sized {
     ///
     /// # Safety
     ///
-    ///  
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-locatedevicepath" target="_blank">
-    /// 7.3.8. EFI_BOOT_SERVICES.LocateDevicePath()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.3.8. EFI_BOOT_SERVICES.LocateDevicePath()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-locatedevicepath)
     unsafe fn locate_device_path(
         &self,
         protocol: &efi::Guid,
@@ -479,10 +412,7 @@ pub trait BootServices: Sized {
     /// Queries a handle to determine if it supports a specified protocol.
     /// If the protocol is supported by the handle, it opens the protocol on behalf of the calling agent.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-openprotocol" target="_blank">
-    /// 7.3.9. EFI_BOOT_SERVICES.OpenProtocol()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.3.9. EFI_BOOT_SERVICES.OpenProtocol()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-openprotocol)
     fn open_protocol<P: Protocol<Interface = I> + 'static, I: 'static>(
         &self,
         handle: efi::Handle,
@@ -514,10 +444,7 @@ pub trait BootServices: Sized {
 
     /// Closes a protocol on a handle that was previously opened.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-closeprotocol" target="_blank">
-    /// 7.3.10. EFI_BOOT_SERVICES.CloseProtocol()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.3.10. EFI_BOOT_SERVICES.CloseProtocol()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-closeprotocol)
     fn close_protocol(
         &self,
         handle: efi::Handle,
@@ -528,10 +455,7 @@ pub trait BootServices: Sized {
 
     /// Retrieves the list of agents that currently have a protocol interface opened.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-openprotocolinformation" target="_blank">
-    /// 7.3.11. EFI_BOOT_SERVICES.OpenProtocolInformation()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.3.11. EFI_BOOT_SERVICES.OpenProtocolInformation()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-openprotocolinformation)
     fn open_protocol_information<'a>(
         &'a self,
         handle: efi::Handle,
@@ -544,10 +468,7 @@ pub trait BootServices: Sized {
     ///
     /// When calling this method, you have to make sure that *driver_image_handle*'s last entry is null per UEFI specification.
     ///  
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-connectcontroller" target="_blank">
-    /// 7.3.12. EFI_BOOT_SERVICES.ConnectController()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.3.12. EFI_BOOT_SERVICES.ConnectController()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-connectcontroller)
     unsafe fn connect_controller(
         &self,
         controller_handle: efi::Handle,
@@ -558,10 +479,7 @@ pub trait BootServices: Sized {
 
     /// Disconnects one or more drivers from a controller.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-disconnectcontroller" target="_blank">
-    /// 7.3.13. EFI_BOOT_SERVICES.DisconnectController()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.3.13. EFI_BOOT_SERVICES.DisconnectController()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-disconnectcontroller)
     fn disconnect_controller(
         &self,
         controller_handle: efi::Handle,
@@ -571,10 +489,7 @@ pub trait BootServices: Sized {
 
     /// Retrieves the list of protocol interface GUIDs that are installed on a handle in a buffer allocated from pool.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-protocolsperhandle" target="_blank">
-    /// 7.3.14. EFI_BOOT_SERVICES.ProtocolsPerHandle()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.3.14. EFI_BOOT_SERVICES.ProtocolsPerHandle()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-protocolsperhandle)
     fn protocols_per_handle<'a>(
         &'a self,
         handle: efi::Handle,
@@ -582,10 +497,7 @@ pub trait BootServices: Sized {
 
     /// Returns an array of handles that support the requested protocol in a buffer allocated from pool.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-locatehandlebuffer" target="_blank">
-    /// 7.3.15. EFI_BOOT_SERVICES.LocateHandleBuffer()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.3.15. EFI_BOOT_SERVICES.LocateHandleBuffer()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-locatehandlebuffer)
     fn locate_handle_buffer<'a>(
         &'a self,
         search_type: HandleSearchType,
@@ -593,10 +505,7 @@ pub trait BootServices: Sized {
 
     /// Returns the first protocol instance that matches the given protocol.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-locateprotocol" target="_blank">
-    /// 7.3.16. EFI_BOOT_SERVICES.LocateProtocol()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.3.16. EFI_BOOT_SERVICES.LocateProtocol()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-locateprotocol)
     fn locate_protocol<P: Protocol<Interface = I> + 'static, I: 'static>(
         &self,
         protocol: &P,
@@ -624,10 +533,7 @@ pub trait BootServices: Sized {
 
     /// Adds, updates, or removes a configuration table entry from the EFI System Table.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-installconfigurationtable" target="_blank">
-    /// 7.5.6. EFI_BOOT_SERVICES.InstallConfigurationTable()
-    /// </a>
+    /// [UEFI Spec Documentation: 7.5.6. EFI_BOOT_SERVICES.InstallConfigurationTable()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-installconfigurationtable)
     fn install_configuration_table<T: StaticPtrMut + 'static>(
         &self,
         guid: &efi::Guid,
