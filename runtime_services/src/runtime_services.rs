@@ -79,10 +79,10 @@ pub trait RuntimeServices: Sized {
         name: &[u16],
         namespace: &efi::Guid,
         attributes: u32,
-        data: &mut T,
+        data: &T,
     ) -> Result<(), efi::Status>
     where
-        T: AsMut<[u8]> + 'static,
+        T: AsRef<[u8]> + 'static,
     {
         if !name.iter().position(|&c| c == 0).is_some() {
             panic!("Name passed into set_variable is not null-terminated.");
@@ -91,7 +91,7 @@ pub trait RuntimeServices: Sized {
         // Keep a local copy of name to unburden the caller of having to pass in a mutable slice
         let mut name_vec = name.to_vec();
 
-        unsafe { self.set_variable_unchecked(name_vec.as_mut_slice(), namespace, attributes, data.as_mut()) }
+        unsafe { self.set_variable_unchecked(name_vec.as_mut_slice(), namespace, attributes, data.as_ref()) }
     }
 
     fn get_variable<T>(
@@ -192,7 +192,7 @@ pub trait RuntimeServices: Sized {
         name: &mut [u16],
         namespace: &efi::Guid,
         attributes: u32,
-        data: &mut [u8],
+        data: &[u8],
     ) -> Result<(), efi::Status>;
 
     unsafe fn get_variable_unchecked<'a>(
@@ -217,7 +217,7 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
         name: &mut [u16],
         namespace: &efi::Guid,
         attributes: u32,
-        data: &mut [u8],
+        data: &[u8],
     ) -> Result<(), efi::Status> {
         let set_variable = self.efi_runtime_services().set_variable;
         if set_variable as usize == 0 {
@@ -229,7 +229,7 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
             namespace as *const _ as *mut _,
             attributes,
             data.len(),
-            data.as_mut_ptr() as *mut c_void,
+            data.as_ptr() as *mut c_void,
         );
 
         if status.is_error() {
