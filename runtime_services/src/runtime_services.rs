@@ -11,13 +11,15 @@ use alloc::vec::Vec;
 use core::{
     ffi::c_void,
     marker::PhantomData,
+    mem::MaybeUninit,
     ptr,
     sync::atomic::{AtomicPtr, Ordering},
 };
 
 use r_efi::efi;
-pub use variable_services::{GetVariableStatus, VariableIdentifier, VariableInfo, VariableNameIterator};
+use r_efi::efi::{Boolean, Time, TimeCapabilities};
 
+pub use variable_services::{GetVariableStatus, VariableIdentifier, VariableInfo, VariableNameIterator};
 /// This is the runtime services used in the UEFI.
 /// it wraps an atomic ptr to [`efi::RuntimeServices`]
 #[derive(Debug)]
@@ -74,13 +76,99 @@ unsafe impl Send for StandardRuntimeServices<'static> {}
 
 #[cfg_attr(any(test, feature = "mockall"), automock)]
 pub trait RuntimeServices: Sized {
-    /// Sets a UEFI variable.
+    /// Get the time.
     ///
     /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html#setvariable" target="_blank">
-    ///   8.2.3. EFI_RUNTIME_SERVICES.SetVariable()
+    /// <a href="https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html#gettime" target="_blank">
+    ///   8.3.1. GetTime()
     /// </a>
-    fn set_variable<T>(&self, name: &[u16], namespace: &efi::Guid, attributes: u32, data: &T) -> Result<(), efi::Status>
+    ///
+    /// [^note]: Time capabilities is always returned in this implementation.
+    fn get_time(
+        &self,
+    ) -> Result<(Time, TimeCapabilities), efi::Status> {
+        unsafe {
+            self.get_time_unchecked()
+        }
+    } 
+
+    /// Prefer normal [`RuntimeServices::get_time`] when possible.
+    unsafe fn get_time_unchecked(
+        &self,
+    ) -> Result<(Time, TimeCapabilities), efi::Status>;
+
+    /// Set the time.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html#settime" target="_blank">
+    ///   8.3.2. SetTime()
+    /// </a>
+    fn set_time(
+        &self,
+        time: &efi::Time,
+    ) -> Result<(), efi::Status> {
+        unsafe {
+            self.set_time_unchecked(time)
+        }
+    }
+
+    /// Prefer normal [`RuntimeServices::set_time`] when possible.
+    unsafe fn set_time_unchecked(
+        &self,
+        time: &efi::Time,
+    ) -> Result<(), efi::Status>;
+
+    /// Get the wake up time.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html#getwakeuptime" target="_blank">
+    ///   8.3.3. GetWakeupTime()
+    /// </a>
+    fn get_wakeup_time(
+        &self,
+    ) -> Result<(bool, bool, Time), efi::Status> {
+        unsafe {
+            self.get_wakeup_time_unchecked()
+        }
+    } 
+
+    /// Prefer normal [`RuntimeServices::get_wakeup_time`] when possible.
+    unsafe fn get_wakeup_time_unchecked(
+        &self,
+    ) -> Result<(bool, bool, Time), efi::Status>;
+
+    /// Set the wake up time.
+    ///
+    /// UEFI Spec Documentation:
+    /// <a href="https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html#setwakeuptime" target="_blank">
+    ///   8.3.4. SetWakeupTime()
+    /// </a>
+    ///
+    /// [^note]: Time must be present regardless of enable value in this implementation.
+    fn set_wakeup_time(
+        &self,
+        enable: bool,
+        time: &efi::Time,
+    ) -> Result<(), efi::Status> {
+        unsafe {
+            self.set_wakeup_time_unchecked(enable, time)
+        }
+    }
+
+    /// Prefer normal [`RuntimeServices::set_wakeup_time`] when possible.
+    unsafe fn set_wakeup_time_unchecked(
+        &self,
+        enable: bool,
+        time: &efi::Time,
+    ) -> Result<(), efi::Status>;
+
+    fn set_variable<T>(
+        &self,
+        name: &[u16],
+        namespace: &efi::Guid,
+        attributes: u32,
+        data: &T,
+    ) -> Result<(), efi::Status>
     where
         T: AsRef<[u8]> + 'static,
     {
@@ -265,6 +353,59 @@ pub trait RuntimeServices: Sized {
 }
 
 impl RuntimeServices for StandardRuntimeServices<'_> {
+    unsafe fn get_time_unchecked(&self) -> Result<(Time, TimeCapabilities), efi::Status> {
+        let get_time = self.efi_runtime_services().get_time;
+        if get_time as usize == 0 {
+            panic!("function not initialize.")
+        }
+        let mut time: MaybeUninit::<efi::Time> = MaybeUninit::zeroed();
+        let mut time_capabilities: MaybeUninit::<efi::TimeCapabilities> = MaybeUninit::zeroed();
+        let status = get_time(time.as_mut_ptr(), time_capabilities.as_mut_ptr());
+        match status {
+           efi::Status::SUCCESS => Ok((time.assume_init(), time_capabilities.assume_init())),
+           some_error => Err(some_error)
+        }
+    }
+
+    unsafe fn set_time_unchecked(&self, time: &efi::Time) -> Result<(), efi::Status> {
+        let set_time = self.efi_runtime_services().set_time;
+        if set_time as usize == 0 {
+            panic!("function not initialize.")
+        }
+        let status = set_time(time as *const efi::Time as *mut efi::Time);
+        match status {
+           efi::Status::SUCCESS => Ok(()),
+           some_error => Err(some_error)
+        }
+    }
+
+    unsafe fn get_wakeup_time_unchecked(&self) -> Result<(bool, bool, Time), efi::Status> {
+        let get_wakeup_time = self.efi_runtime_services().get_wakeup_time;
+        if get_wakeup_time as usize == 0 {
+            panic!("function not initialize.")
+        }
+        let mut enabled: MaybeUninit::<Boolean> = MaybeUninit::zeroed();
+        let mut pending: MaybeUninit::<Boolean> = MaybeUninit::zeroed();
+        let mut time: MaybeUninit::<efi::Time> = MaybeUninit::zeroed();
+        let status = get_wakeup_time(enabled.as_mut_ptr(), pending.as_mut_ptr(), time.as_mut_ptr());
+        match status {
+            efi::Status::SUCCESS => Ok((enabled.assume_init().into(), pending.assume_init().into(), time.assume_init())),
+            some_error => Err(some_error)
+        }
+    }
+
+    unsafe fn set_wakeup_time_unchecked(&self, enable: bool, time: &efi::Time) -> Result<(), efi::Status> {
+        let set_wakeup_time = self.efi_runtime_services().set_wakeup_time;
+        if set_wakeup_time as usize == 0 {
+            panic!("function not initialize.")
+        }
+        let status = set_wakeup_time(enable.into(), time as *const efi::Time as *mut efi::Time);
+        match status {
+           efi::Status::SUCCESS => Ok(()),
+           some_error => Err(some_error)
+        }
+    }
+
     unsafe fn set_variable_unchecked(
         &self,
         name: &mut [u16],
