@@ -21,8 +21,8 @@ include = [
 [workspace.dependencies]
 r-efi = "5.1.0"
 boot_services = { path="./boot_services" }
-guid = { path="./guid" }
 runtime_services = { path="./runtime_services" }
+guid = { path="./guid" }
 tpl_mutex = { path="./tpl_mutex" }
 uuid = { version = "1.10.0", default-features = false}
 
