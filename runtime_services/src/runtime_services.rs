@@ -43,14 +43,14 @@ impl<'a> StandardRuntimeServices<'a> {
     }
 
     /// Initialize the StandardRuntimeServices with a reference to [efi::RuntimeServices].
-    /// # Panics
-    /// This function will panic if already initialize.
+    /// # Debug asserts
+    /// This function will assert on debug if already initialized.
     pub fn initialize(&'a self, efi_runtime_services: &'a efi::RuntimeServices) {
         if self.efi_runtime_services.load(Ordering::Relaxed).is_null() {
             // The efi::RuntimeServices is only read, that is why we use a non mutable reference.
             self.efi_runtime_services.store(efi_runtime_services as *const _ as *mut _, Ordering::SeqCst)
         } else {
-            panic!("Runtime services is already initialized.")
+            debug_assert!(false, "Runtime services is already initialized.");
         }
     }
 
@@ -85,7 +85,8 @@ pub trait RuntimeServices: Sized {
         T: AsRef<[u8]> + 'static,
     {
         if !name.iter().position(|&c| c == 0).is_some() {
-            panic!("Name passed into set_variable is not null-terminated.");
+            debug_assert!(false, "Name passed into set_variable is not null-terminated.");
+            return Err(efi::Status::INVALID_PARAMETER);
         }
 
         // Keep a local copy of name to unburden the caller of having to pass in a mutable slice
@@ -112,7 +113,8 @@ pub trait RuntimeServices: Sized {
         T: TryFrom<Vec<u8>> + 'static,
     {
         if !name.iter().position(|&c| c == 0).is_some() {
-            panic!("Name passed into get_variable is not null-terminated.");
+            debug_assert!(false, "Name passed into get_variable is not null-terminated.");
+            return Err(efi::Status::INVALID_PARAMETER);
         }
 
         // Keep a local copy of name to unburden the caller of having to pass in a mutable slice
@@ -167,7 +169,8 @@ pub trait RuntimeServices: Sized {
         namespace: &efi::Guid,
     ) -> Result<(usize, u32), efi::Status> {
         if !name.iter().position(|&c| c == 0).is_some() {
-            panic!("Name passed into set_variable is not null-terminated.");
+            debug_assert!(false, "Name passed into set_variable is not null-terminated.");
+            return Err(efi::Status::INVALID_PARAMETER);
         }
 
         // Keep a local copy of name to unburden the caller of having to pass in a mutable slice
@@ -177,8 +180,9 @@ pub trait RuntimeServices: Sized {
             match self.get_variable_unchecked(name_vec.as_mut_slice(), namespace, None) {
                 GetVariableStatus::BufferTooSmall { data_size, attributes } => Ok((data_size, attributes)),
                 GetVariableStatus::Error(e) => Err(e),
-                GetVariableStatus::Success { data_size: _, attributes: _ } => {
-                    panic!("GetVariable call with zero-sized buffer returned Success.")
+                GetVariableStatus::Success { data_size, attributes } => {
+                    debug_assert!(false, "GetVariable call with zero-sized buffer returned Success.");
+                    Ok((data_size, attributes))
                 }
             }
         }
@@ -200,7 +204,8 @@ pub trait RuntimeServices: Sized {
         prev_namespace: &efi::Guid,
     ) -> Result<(Vec<u16>, efi::Guid), efi::Status> {
         if prev_name.len() == 0 {
-            panic!("Zero-length name passed into get_next_variable_name.");
+            debug_assert!(false, "Zero-length name passed into get_next_variable_name.");
+            return Err(efi::Status::INVALID_PARAMETER);
         }
 
         let mut next_name = Vec::<u16>::new();
@@ -274,7 +279,8 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
     ) -> Result<(), efi::Status> {
         let set_variable = self.efi_runtime_services().set_variable;
         if set_variable as usize == 0 {
-            panic!("SetVariable has not initialized in the Runtime Services Table.")
+            debug_assert!(false, "SetVariable has not initialized in the Runtime Services Table.");
+            return Err(efi::Status::NOT_FOUND);
         }
 
         let status = set_variable(
@@ -300,7 +306,8 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
     ) -> GetVariableStatus {
         let get_variable = self.efi_runtime_services().get_variable;
         if get_variable as usize == 0 {
-            panic!("GetVariable has not initialized in the Runtime Services Table.")
+            debug_assert!(false, "GetVariable has not initialized in the Runtime Services Table.");
+            return GetVariableStatus::Error(efi::Status::NOT_FOUND);
         }
 
         let mut data_size: usize = match data {
@@ -338,7 +345,8 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
     ) -> Result<(), efi::Status> {
         let get_next_variable_name = self.efi_runtime_services().get_next_variable_name;
         if get_next_variable_name as usize == 0 {
-            panic!("GetNextVariableName has not initialized in the Runtime Services Table.")
+            debug_assert!(false, "GetNextVariableName has not initialized in the Runtime Services Table.");
+            return Err(efi::Status::NOT_FOUND);
         }
 
         // Copy prev_name and namespace into next name and namespace
@@ -383,7 +391,8 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
     fn query_variable_info(&self, attributes: u32) -> Result<VariableInfo, efi::Status> {
         let query_variable_info = self.efi_runtime_services().query_variable_info;
         if query_variable_info as usize == 0 {
-            panic!("QueryVariableInfo has not initialized in the Runtime Services Table.")
+            debug_assert!(false, "QueryVariableInfo has not initialized in the Runtime Services Table.");
+            return Err(efi::Status::NOT_FOUND);
         }
 
         let mut var_info = VariableInfo {
