@@ -341,7 +341,7 @@ impl RuntimeServices for StandardRuntimeServices<'_> {
             panic!("GetNextVariableName has not initialized in the Runtime Services Table.")
         }
 
-        // Copy prev_name and namespace into next name abd banesoace
+        // Copy prev_name and namespace into next name and namespace
         if next_name.len() < prev_name.len() {
             next_name.resize(prev_name.len(), 0);
         }
