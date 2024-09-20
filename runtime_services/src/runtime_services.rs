@@ -100,7 +100,9 @@ pub trait RuntimeServices: Sized {
         unsafe { self.set_variable_unchecked(name_vec.as_mut_slice(), namespace, attributes, data.as_ref()) }
     }
 
-    /// Sets a UEFI variable.
+    /// Gets a UEFI variable.
+    ///
+    /// Returns a tuple of (data, attributes)
     ///
     /// UEFI Spec Documentation:
     /// <a href="https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html#getvariable" target="_blank">
@@ -164,7 +166,7 @@ pub trait RuntimeServices: Sized {
         }
     }
 
-    /// Helper function to get a UEFI variables size and attributes
+    /// Helper function to get a UEFI variable's size and attributes
     fn get_variable_size_and_attributes(
         &self,
         name: &[u16],
@@ -188,7 +190,10 @@ pub trait RuntimeServices: Sized {
         }
     }
 
-    /// Gets the next UEFI variable's name.
+    /// Gets the name and namespace of the UEFI variable after the one provided.
+    ///
+    /// Returns a tuple of (name, namespace)
+    ///
     /// Note: Unlike get_variable, a non-null terminated name will return INVALID_PARAMETER per UEFI spec
     ///
     /// UEFI Spec Documentation:
@@ -252,11 +257,15 @@ pub trait RuntimeServices: Sized {
         data: Option<&'a mut [u8]>,
     ) -> GetVariableStatus;
 
-    /// Gets a UEFI variable
+    /// Gets the UEFI variable name after the one provided.
+    ///
+    /// Will populate next_name and next_namespace.
     ///
     /// # Safety
     ///
-    /// Ensure name is null-terminated
+    /// Ensure name isn't empty. It can be an empty string,
+    /// but there must be some data.
+    ///
     unsafe fn get_next_variable_name_unchecked(
         &self,
         prev_name: &[u16],
