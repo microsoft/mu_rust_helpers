@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "boot_services",
     "runtime_services",
+    "guid",
     "tpl_mutex"
 ]
 
@@ -18,10 +19,15 @@ include = [
 ]
 
 [workspace.dependencies]
-r-efi = "5.0.0"
+r-efi = "5.1.0"
 boot_services = { path="./boot_services" }
+<<<<<<< HEAD
 runtime_services = { path="./runtime_services" }
+=======
+guid = { path="./guid" }
+>>>>>>> b4efe4d877427d62ffea87d6a7a5565deea38d33
 tpl_mutex = { path="./tpl_mutex" }
+uuid = { version = "1.10.0", default-features = false}
 
 [package]
 name = "mu_rust_helpers"
@@ -33,14 +39,24 @@ edition.workspace = true
 include.workspace = true
 
 [features]
+<<<<<<< HEAD
 default = ["boot_services", "runtime_services", "tpl_mutex"]
 boot_services = ["dep:boot_services"]
 runtime_services = ["dep:runtime_services"]
+=======
+default = ["boot_services", "guid", "tpl_mutex"]
+boot_services = ["dep:boot_services"]
+guid = ["dep:guid"]
+>>>>>>> b4efe4d877427d62ffea87d6a7a5565deea38d33
 tpl_mutex = ["dep:tpl_mutex"]
 
 [dependencies]
 boot_services = { path = "./boot_services", version = "0.1.0", optional = true }
+<<<<<<< HEAD
 runtime_services = { path = "./runtime_services", version = "0.1.0", optional = true }
+=======
+guid = { path = "./guid", version = "0.1.0", optional = true }
+>>>>>>> b4efe4d877427d62ffea87d6a7a5565deea38d33
 tpl_mutex = { path = "./tpl_mutex", version = "0.1.0", optional = true }
 
 [dev-dependencies]
