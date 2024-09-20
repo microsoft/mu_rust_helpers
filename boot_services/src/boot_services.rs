@@ -88,6 +88,7 @@ unsafe impl Send for StandardBootServices<'static> {}
 
 /// Functions that are available *before* a successful call to EFI_BOOT_SERVICES.ExitBootServices().
 #[cfg_attr(any(test, feature = "mockall"), automock)]
+#[allow(clippy::needless_lifetimes)]
 pub trait BootServices: Sized {
     /// Create an event.
     ///
@@ -264,9 +265,6 @@ pub trait BootServices: Sized {
 
     fn free_pages(&self, address: usize, nb_pages: usize) -> Result<(), efi::Status>;
 
-    // Allowing Clippy's needless_lifetimes lint due to the necessity of an explicit lifetime for BootServicesBox,
-    // which is used by MemoryMap.
-    #[allow(clippy::needless_lifetimes)]
     fn get_memory_map<'a>(&'a self) -> Result<MemoryMap<'a, Self>, (efi::Status, usize)>;
 
     fn allocate_pool(&self, pool_type: MemoryType, size: usize) -> Result<*mut u8, efi::Status>;
@@ -319,7 +317,7 @@ pub trait BootServices: Sized {
             None => interface as *mut _ as *mut c_void,
         };
         //SAFETY: The generic Protocol ensure that the interface is the right type for the specified protocol.
-        unsafe { self.uninstall_protocol_interface_unchecked(handle, protocol.protocol_guid(), interface_ptr) }
+        self.uninstall_protocol_interface_unchecked(handle, protocol.protocol_guid(), interface_ptr)
     }
 
     /// # Safety
@@ -355,14 +353,12 @@ pub trait BootServices: Sized {
             new_protocol_interface_ptr = new_protocol_interface as *mut _ as *mut c_void;
         }
         //SAFETY: The generic Protocol ensure that the interfaces are the right type for the specified protocol.
-        unsafe {
-            self.reinstall_protocol_interface_unchecked(
-                handle,
-                protocol.protocol_guid(),
-                old_protocol_interface_ptr,
-                new_protocol_interface_ptr,
-            )
-        }
+        self.reinstall_protocol_interface_unchecked(
+            handle,
+            protocol.protocol_guid(),
+            old_protocol_interface_ptr,
+            new_protocol_interface_ptr,
+        )
     }
 
     /// # Safety
@@ -384,8 +380,6 @@ pub trait BootServices: Sized {
         event: efi::Event,
     ) -> Result<Registration, efi::Status>;
 
-    // Allowing Clippy's needless_lifetimes lint due to the necessity of an explicit lifetime for BootServicesBox.
-    #[allow(clippy::needless_lifetimes)]
     fn locate_handle<'a>(
         &'a self,
         search_type: HandleSearchType,
@@ -471,15 +465,11 @@ pub trait BootServices: Sized {
         child_handle: Option<efi::Handle>,
     ) -> Result<(), efi::Status>;
 
-    // Allowing Clippy's needless_lifetimes lint due to the necessity of an explicit lifetime for BootServicesBox.
-    #[allow(clippy::needless_lifetimes)]
     fn protocols_per_handle<'a>(
         &'a self,
         handle: efi::Handle,
     ) -> Result<BootServicesBox<'a, [efi::Guid], Self>, efi::Status>;
 
-    // Allowing Clippy's needless_lifetimes lint due to the necessity of an explicit lifetime for BootServicesBox.
-    #[allow(clippy::needless_lifetimes)]
     fn locate_handle_buffer<'a>(
         &'a self,
         search_type: HandleSearchType,
