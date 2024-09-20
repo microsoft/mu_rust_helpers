@@ -27,6 +27,32 @@ pub struct VariableIdentifier {
     namespace: efi::Guid,
 }
 
+//// Provides a fallable streaming iterator over UEFI variable names.
+/// 
+/// Will produce an EFI status on error.
+/// 
+/// # Examples
+/// 
+/// ### Iterating through all UEFI variable names
+/// ```
+/// let mut iter = VariableNameIterator::new_from_first(runtime_services);
+/// while let Some(variable_identifier) = iter.next()? {
+///     some_function(variable_identifier.name, variable_identifier.namespace);
+/// }
+/// ```
+/// 
+/// ### Iterating through UEFI variable names, starting with a known one
+/// ```
+/// let mut iter = VariableNameIterator::new_from_variable(
+///     &SOME_VARIABLE_NAME,
+///     &SOME_VARIABLE_NAMESPACE,
+///     runtime_services
+/// );
+/// 
+/// while let Some(variable_identifier) = iter.next()? {
+///     some_function(variable_identifier.name, variable_identifier.namespace);
+/// }
+/// ```
 #[derive(Debug)]
 pub struct VariableNameIterator<'a, R: RuntimeServices> {
     rs: &'a R,
@@ -37,6 +63,7 @@ pub struct VariableNameIterator<'a, R: RuntimeServices> {
 }
 
 impl<'a, R: RuntimeServices> VariableNameIterator<'a, R> {
+    /// Produce a new iterator from the beginning of the UEFI variable list
     pub fn new_from_first(
         runtime_services: &'a R
     ) -> Self {
@@ -62,6 +89,7 @@ impl<'a, R: RuntimeServices> VariableNameIterator<'a, R> {
         }
     }
 
+    /// Produce a new iterator, starting from a given variable
     pub fn new_from_variable(
         name: &[u16],
         namespace: &efi::Guid,
