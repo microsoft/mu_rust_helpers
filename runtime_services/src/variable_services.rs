@@ -27,7 +27,7 @@ pub struct VariableIdentifier {
     namespace: efi::Guid,
 }
 
-//// Provides a fallable streaming iterator over UEFI variable names.
+//// Provides a fallible streaming iterator over UEFI variable names.
 /// 
 /// Will produce an EFI status on error.
 /// 
