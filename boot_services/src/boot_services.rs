@@ -1670,4 +1670,76 @@ mod test {
         let result = boot_services.locate_protocol(&DEVICE_PATH_PROTOCOL, None);
         assert!(matches!(result, Ok(None)));
     }
+
+    #[test]
+    fn test_get_memory_map() {
+        let boot_services = boot_services!(
+            get_memory_map = efi_get_memory_map,
+            allocate_pool = efi_allocate_pool,
+            free_pool = efi_free_pool
+        );
+
+        extern "efiapi" fn efi_get_memory_map(
+            memory_map_size: *mut usize,
+            memory_map: *mut efi::MemoryDescriptor,
+            _map_key: *mut usize,
+            descriptor_size: *mut usize,
+            descriptor_version: *mut u32,
+        ) -> efi::Status {
+            if memory_map_size.is_null() {
+                return efi::Status::INVALID_PARAMETER;
+            }
+
+            let memory_map_size_value = unsafe { *memory_map_size };
+            if memory_map_size_value == 0 {
+                unsafe { ptr::write(memory_map_size, 0x400) };
+                return efi::Status::BUFFER_TOO_SMALL;
+            }
+
+            unsafe {
+                (*memory_map).physical_start = 0xffffffffaaaabbbb;
+                *descriptor_size = mem::size_of::<efi::MemoryDescriptor>();
+                *descriptor_version = 1;
+            }
+            efi::Status::SUCCESS
+        }
+
+        extern "efiapi" fn efi_allocate_pool(
+            _mem_type: efi::MemoryType,
+            size: usize,
+            buffer: *mut *mut c_void,
+        ) -> efi::Status {
+            let allocation = vec![0u8; size].into_boxed_slice();
+
+            unsafe {
+                *buffer = Box::into_raw(allocation) as *mut c_void;
+            }
+            efi::Status::SUCCESS
+        }
+
+        extern "efiapi" fn efi_free_pool(buffer: *mut c_void) -> efi::Status {
+            if buffer.is_null() {
+                return efi::Status::INVALID_PARAMETER;
+            }
+
+            unsafe {
+                let _ = Box::from_raw(buffer as *mut u8);
+            }
+
+            efi::Status::SUCCESS
+        }
+
+        let status = boot_services.get_memory_map();
+
+        match status {
+            Ok(memory_map) => {
+                assert_eq!(memory_map.map_key, 0);
+                assert_eq!(memory_map.descriptor_version, 1);
+                assert_eq!(memory_map.descriptors[0].physical_start, 0xffffffffaaaabbbb);
+            }
+            Err((status, _)) => {
+                assert!(false, "Error: {:?}", status);
+            }
+        }
+    }
 }
