@@ -1487,4 +1487,69 @@ mod test {
         let status = boot_services.free_pages(0x100000, 10);
         assert!(matches!(status, Ok(())));
     }
+
+    #[test]
+    fn test_locate_protocol() {
+        const DEVICE_PATH_PROTOCOL: protocol_handler::DevicePath = protocol_handler::DevicePath {};
+        use r_efi::protocols::device_path;
+        static DEVICE_PATH_PROTOCOL_INTERFACE: device_path::Protocol = unsafe { MaybeUninit::zeroed().assume_init() };
+        let boot_services = boot_services!(locate_protocol = efi_locate_protocol);
+
+        extern "efiapi" fn efi_locate_protocol(
+            guid: *mut efi::Guid,
+            registration: *mut c_void,
+            interface: *mut *mut c_void,
+        ) -> efi::Status {
+            unsafe {
+                assert_eq!(
+                    guid.as_mut().unwrap(),
+                    &device_path::PROTOCOL_GUID,
+                    "Guid should have been Device Path guid"
+                );
+                assert!(registration.is_null(), "Registration should be a null pointer");
+                let device_path_interface = interface as *mut *mut device_path::Protocol;
+                assert!(!device_path_interface.is_null(), "Interface should not be a null pointer");
+
+                *device_path_interface =
+                    &DEVICE_PATH_PROTOCOL_INTERFACE as *const device_path::Protocol as *mut device_path::Protocol;
+            }
+
+            efi::Status::SUCCESS
+        }
+
+        let result = boot_services.locate_protocol(&DEVICE_PATH_PROTOCOL, None);
+        assert!(matches!(result, Ok(Some(protocol)) if std::ptr::eq(protocol, &DEVICE_PATH_PROTOCOL_INTERFACE)));
+    }
+
+    #[test]
+    fn test_locate_protocol_indicator_protocol() {
+        const DEVICE_PATH_PROTOCOL: protocol_handler::DevicePath = protocol_handler::DevicePath {};
+        let boot_services = boot_services!(locate_protocol = efi_locate_protocol);
+
+        extern "efiapi" fn efi_locate_protocol(
+            guid: *mut efi::Guid,
+            registration: *mut c_void,
+            interface: *mut *mut c_void,
+        ) -> efi::Status {
+            use r_efi::protocols::device_path;
+            unsafe {
+                assert_eq!(
+                    guid.as_mut().unwrap(),
+                    &device_path::PROTOCOL_GUID,
+                    "Guid should have been Device Path guid"
+                );
+                assert!(registration.is_null(), "Registration should be a null pointer");
+                let device_path_interface = interface as *mut *mut device_path::Protocol;
+                assert!(!device_path_interface.is_null(), "Interface should not be a null pointer");
+
+                // set to null to simulate an indicator protocol
+                *device_path_interface = core::ptr::null_mut() as *mut device_path::Protocol;
+            }
+
+            efi::Status::SUCCESS
+        }
+
+        let result = boot_services.locate_protocol(&DEVICE_PATH_PROTOCOL, None);
+        assert!(matches!(result, Ok(None)));
+    }
 }
