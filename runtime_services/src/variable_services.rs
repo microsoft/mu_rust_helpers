@@ -34,7 +34,7 @@ pub struct VariableIdentifier {
 /// # Examples
 /// 
 /// ### Iterating through all UEFI variable names
-/// ```
+/// ```ignore
 /// let mut iter = VariableNameIterator::new_from_first(runtime_services);
 /// while let Some(variable_identifier) = iter.next()? {
 ///     some_function(variable_identifier.name, variable_identifier.namespace);
@@ -42,7 +42,7 @@ pub struct VariableIdentifier {
 /// ```
 /// 
 /// ### Iterating through UEFI variable names, starting with a known one
-/// ```
+/// ```ignore
 /// let mut iter = VariableNameIterator::new_from_variable(
 ///     &SOME_VARIABLE_NAME,
 ///     &SOME_VARIABLE_NAMESPACE,
