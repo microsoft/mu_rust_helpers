@@ -6,41 +6,64 @@ use r_efi::efi::{self, Guid};
 
 use crate::RuntimeServices;
 
+/// Status information returned by [`RuntimeServices::get_variable_unchecked`]
 #[derive(Debug)]
 pub enum GetVariableStatus {
+    /// The variable was unable to be retrieved
     Error(efi::Status),
-    BufferTooSmall { data_size: usize, attributes: u32 },
-    Success { data_size: usize, attributes: u32 },
+    /// The variable was found, but the buffer provided wasn't large enough
+    BufferTooSmall {
+        /// The size of a buffer needed to retrieve the variable data
+        data_size: usize,
+        /// The attributes of the variable
+        attributes: u32,
+    },
+    /// The variable was successfully retrieved
+    Success {
+        /// The size of the variable data retrieved
+        data_size: usize,
+        /// The attributes of the variable
+        attributes: u32,
+    },
 }
 
+/// Variable information returned by [`RuntimeServices::query_variable_info`]
 #[derive(Debug)]
 pub struct VariableInfo {
+    /// The maximum size of the storage space available for the EFI variables associated with the attributes specified
     pub maximum_variable_storage_size: u64,
+    /// The remaining size of the storage space available for EFI variables associated with the attributes specified
     pub remaining_variable_storage_size: u64,
+    // The maximum size of an individual EFI variable associated with the attributes specified
     pub maximum_variable_size: u64,
 }
 
+/// Uniquely identifies a UEFI variable
 #[derive(Debug)]
 pub struct VariableIdentifier {
+    /// The name of a UEFI variable
     name: Vec<u16>,
+    /// The namespace of a UEFI variable
     namespace: efi::Guid,
 }
 
-//// Provides a fallible streaming iterator over UEFI variable names.
+/// Provides a [`FallibleStreamingIterator`] over UEFI variable names
 ///
-/// Will produce an EFI status on error.
+/// Produces an EFI status on error.
 ///
 /// # Examples
 ///
-/// ### Iterating through all UEFI variable names
+/// ## Iterating through all UEFI variable names
 /// ```ignore
+/// pub static RUNTIME_SERVICES: StandardRuntimeServices =
+///     StandardRuntimeServices::new(&(*runtime_services_ptr));
 /// let mut iter = VariableNameIterator::new_from_first(runtime_services);
 /// while let Some(variable_identifier) = iter.next()? {
 ///     some_function(variable_identifier.name, variable_identifier.namespace);
 /// }
 /// ```
 ///
-/// ### Iterating through UEFI variable names, starting with a known one
+/// ## Iterating through UEFI variable names, starting with a known one
 /// ```ignore
 /// let mut iter = VariableNameIterator::new_from_variable(
 ///     &SOME_VARIABLE_NAME,
@@ -100,6 +123,11 @@ impl<'a, R: RuntimeServices> FallibleStreamingIterator for VariableNameIterator<
 
     fn advance(&mut self) -> Result<(), Self::Error> {
         unsafe {
+            // Don't do anything if we've reached the end already
+            if self.finished {
+                return Ok(());
+            }
+
             let status = self.rs.get_next_variable_name_unchecked(
                 &self.current.name,
                 &self.current.namespace,

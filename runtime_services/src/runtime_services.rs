@@ -1,8 +1,21 @@
+//! Rustified UEFI Runtime Service Wrappers
+//!
+//! Provides safe and unsafe easy-to-use wrappers for UEFI runtime services, as well as additional
+//! utilities and helper functions.
+//!
+//! ```ignore
+//! pub static RUNTIME_SERVICES: StandardRuntimeServices =
+//!     StandardRuntimeServices::new(&(*runtime_services_ptr));
+//! let variable_services::VariableInfo = RUNTIME_SERVICES.query_variable_info(attributes);
+//! ```
+//!
+
 #![cfg_attr(all(not(test), not(feature = "mockall")), no_std)]
 
 extern crate alloc;
 
-mod variable_services;
+/// Variable-services-specific structs and utilities
+pub mod variable_services;
 
 #[cfg(any(test, feature = "mockall"))]
 use mockall::automock;
@@ -16,10 +29,15 @@ use core::{
 };
 
 use r_efi::efi;
-pub use variable_services::{GetVariableStatus, VariableIdentifier, VariableInfo, VariableNameIterator};
+use variable_services::{GetVariableStatus, VariableInfo};
 
-/// This is the runtime services used in the UEFI.
-/// it wraps an atomic ptr to [`efi::RuntimeServices`]
+/// The UEFI spec runtime serivces.
+/// It wraps an [`AtomicPtr`] around [`efi::RuntimeServices`]
+///
+/// UEFI Spec Documentation:
+/// <a href="https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html" target="_blank">
+///   8. Services - Runtime Services
+/// </a>
 #[derive(Debug)]
 pub struct StandardRuntimeServices<'a> {
     efi_runtime_services: AtomicPtr<efi::RuntimeServices>,
@@ -73,6 +91,8 @@ unsafe impl Sync for StandardRuntimeServices<'static> {}
 unsafe impl Send for StandardRuntimeServices<'static> {}
 
 #[cfg_attr(any(test, feature = "mockall"), automock)]
+
+/// Interface for "Rustified" wrappers of the UEFI Runtime Services
 pub trait RuntimeServices: Sized {
     /// Sets a UEFI variable.
     ///
@@ -499,7 +519,7 @@ pub(crate) mod test {
         }
     }
 
-    //// Mocks GetVariable() from UEFI spec
+    /// Mocks GetVariable() from UEFI spec
     ///
     /// Expects to be passed DUMMY_FIRST_NAME, DUMMY_FIRST_NAMESPACE, and to return
     /// DUMMY_ATTRIBUTES, and DUMMY_DATA.
@@ -542,7 +562,7 @@ pub(crate) mod test {
         efi::Status::SUCCESS
     }
 
-    //// Mocks SetVariable() from UEFI spec
+    /// Mocks SetVariable() from UEFI spec
     ///
     /// Expects to be passed DUMMY_FIRST_NAME, DUMMY_FIRST_NAMESPACE, and DUMMY_DATA
     ///
@@ -582,7 +602,7 @@ pub(crate) mod test {
         efi::Status::SUCCESS
     }
 
-    //// Mocks GetNextVariableName() from UEFI spec
+    /// Mocks GetNextVariableName() from UEFI spec
     ///
     /// Will mock a list of two variables:
     ///     1. DUMMY_FIRST_NAME (under namespace DUMMY_FIRST_NAMESPACE)
@@ -650,7 +670,7 @@ pub(crate) mod test {
         efi::Status::SUCCESS
     }
 
-    //// Mocks QueryVariableInfo() from UEFI spec
+    /// Mocks QueryVariableInfo() from UEFI spec
     ///
     /// Expects to be passed DUMMY_ATTRIBUTES, and to return, DUMMY_MAXIMUM_VARIABLE_STORAGE_SIZE,
     /// DUMMY_REMAINING_VARIABLE_STORAGE_SIZE, and DUMMY_MAXIMUM_VARIABLE_SIZE.
