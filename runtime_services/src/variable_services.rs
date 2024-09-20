@@ -1,9 +1,8 @@
-
 use core::mem;
 
-use r_efi::efi::{self, Guid};
-use fallible_streaming_iterator::FallibleStreamingIterator;
 use alloc::vec::Vec;
+use fallible_streaming_iterator::FallibleStreamingIterator;
+use r_efi::efi::{self, Guid};
 
 use crate::RuntimeServices;
 
@@ -28,11 +27,11 @@ pub struct VariableIdentifier {
 }
 
 //// Provides a fallible streaming iterator over UEFI variable names.
-/// 
+///
 /// Will produce an EFI status on error.
-/// 
+///
 /// # Examples
-/// 
+///
 /// ### Iterating through all UEFI variable names
 /// ```ignore
 /// let mut iter = VariableNameIterator::new_from_first(runtime_services);
@@ -40,7 +39,7 @@ pub struct VariableIdentifier {
 ///     some_function(variable_identifier.name, variable_identifier.namespace);
 /// }
 /// ```
-/// 
+///
 /// ### Iterating through UEFI variable names, starting with a known one
 /// ```ignore
 /// let mut iter = VariableNameIterator::new_from_variable(
@@ -48,7 +47,7 @@ pub struct VariableIdentifier {
 ///     &SOME_VARIABLE_NAMESPACE,
 ///     runtime_services
 /// );
-/// 
+///
 /// while let Some(variable_identifier) = iter.next()? {
 ///     some_function(variable_identifier.name, variable_identifier.namespace);
 /// }
@@ -59,14 +58,12 @@ pub struct VariableNameIterator<'a, R: RuntimeServices> {
 
     current: VariableIdentifier,
     next: VariableIdentifier,
-    finished: bool
+    finished: bool,
 }
 
 impl<'a, R: RuntimeServices> VariableNameIterator<'a, R> {
     /// Produce a new iterator from the beginning of the UEFI variable list
-    pub fn new_from_first(
-        runtime_services: &'a R
-    ) -> Self {
+    pub fn new_from_first(runtime_services: &'a R) -> Self {
         Self {
             rs: &runtime_services,
             current: VariableIdentifier {
@@ -74,38 +71,25 @@ impl<'a, R: RuntimeServices> VariableNameIterator<'a, R> {
                     // Previous name should be an empty string to get the first variable
                     let mut prev_name = Vec::<u16>::with_capacity(1);
                     prev_name.resize(1, 0);
-    
+
                     prev_name
                 },
                 // When calling with an empty name, the GUID is ignored.
                 // We can just set it to zero.
-                namespace: Guid::from_bytes(&[0x0; 16])
+                namespace: Guid::from_bytes(&[0x0; 16]),
             },
-            next: VariableIdentifier {
-                name: Vec::<u16>::new(),
-                namespace: Guid::from_bytes(&[0x0; 16])
-            },
-            finished: false
+            next: VariableIdentifier { name: Vec::<u16>::new(), namespace: Guid::from_bytes(&[0x0; 16]) },
+            finished: false,
         }
     }
 
     /// Produce a new iterator, starting from a given variable
-    pub fn new_from_variable(
-        name: &[u16],
-        namespace: &efi::Guid,
-        runtime_services: &'a R
-    ) -> Self {
+    pub fn new_from_variable(name: &[u16], namespace: &efi::Guid, runtime_services: &'a R) -> Self {
         Self {
             rs: &runtime_services,
-            current: VariableIdentifier {
-                name: name.to_vec(),
-                namespace: namespace.clone()
-            },
-            next: VariableIdentifier {
-                name: Vec::<u16>::new(),
-                namespace: Guid::from_bytes(&[0x0; 16])
-            },
-            finished: false
+            current: VariableIdentifier { name: name.to_vec(), namespace: namespace.clone() },
+            next: VariableIdentifier { name: Vec::<u16>::new(), namespace: Guid::from_bytes(&[0x0; 16]) },
+            finished: false,
         }
     }
 }
@@ -120,7 +104,7 @@ impl<'a, R: RuntimeServices> FallibleStreamingIterator for VariableNameIterator<
                 &self.current.name,
                 &self.current.namespace,
                 &mut self.next.name,
-                &mut self.next.namespace
+                &mut self.next.namespace,
             );
 
             mem::swap(&mut self.current, &mut self.next);
@@ -129,14 +113,17 @@ impl<'a, R: RuntimeServices> FallibleStreamingIterator for VariableNameIterator<
                 self.finished = true;
                 return Ok(());
             } else {
-                return status
+                return status;
             }
         }
     }
 
     fn get(&self) -> Option<&Self::Item> {
-        if self.finished { None } else { Some(&self.current) }
-        
+        if self.finished {
+            None
+        } else {
+            Some(&self.current)
+        }
     }
 }
 
@@ -152,7 +139,8 @@ mod test {
 
     #[test]
     fn test_variable_name_iterator_from_first() {
-        let rs: &StandardRuntimeServices<'_> = runtime_services!(get_next_variable_name = mock_efi_get_next_variable_name);
+        let rs: &StandardRuntimeServices<'_> =
+            runtime_services!(get_next_variable_name = mock_efi_get_next_variable_name);
 
         let mut iter = VariableNameIterator::new_from_first(rs);
 
@@ -180,13 +168,10 @@ mod test {
 
     #[test]
     fn test_variable_name_iterator_from_second() {
-        let rs: &StandardRuntimeServices<'_> = runtime_services!(get_next_variable_name = mock_efi_get_next_variable_name);
+        let rs: &StandardRuntimeServices<'_> =
+            runtime_services!(get_next_variable_name = mock_efi_get_next_variable_name);
 
-        let mut iter = VariableNameIterator::new_from_variable(
-            &DUMMY_FIRST_NAME,
-            &DUMMY_FIRST_NAMESPACE,
-            rs
-        );
+        let mut iter = VariableNameIterator::new_from_variable(&DUMMY_FIRST_NAME, &DUMMY_FIRST_NAMESPACE, rs);
 
         // Make sure the first result corresponds to DUMMY_SECOND_NAME
         let mut status = iter.next();
