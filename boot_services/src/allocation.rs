@@ -42,18 +42,9 @@ impl Into<u32> for MemoryType {
 
 #[derive(Debug)]
 pub struct MemoryMap<'a, B: BootServices> {
-    pub descriptors: BootServicesBox<'a, [MemoryDescriptor], B>,
+    pub descriptors: BootServicesBox<'a, [efi::MemoryDescriptor], B>,
     pub map_key: usize,
     pub descriptor_version: u32,
-}
-
-#[derive(Debug)]
-pub struct MemoryDescriptor {
-    pub memory_type: MemoryType,
-    pub physical_start: usize,
-    pub virtual_start: usize,
-    pub nb_pages: usize,
-    pub attribute: MemoryAttribute,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
