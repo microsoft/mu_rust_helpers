@@ -1496,19 +1496,20 @@ mod test {
         let boot_services = boot_services!(locate_protocol = efi_locate_protocol);
 
         extern "efiapi" fn efi_locate_protocol(
-            guid: *mut efi::Guid,
+            protocol_guid: *mut efi::Guid,
             registration: *mut c_void,
             interface: *mut *mut c_void,
         ) -> efi::Status {
             unsafe {
-                assert_eq!(
-                    guid.as_mut().unwrap(),
-                    &device_path::PROTOCOL_GUID,
-                    "Guid should have been Device Path guid"
-                );
+                assert!(!protocol_guid.is_null(), "Protocol guid should not be null");
                 assert!(registration.is_null(), "Registration should be a null pointer");
+                assert!(!interface.is_null(), "Interface should not be a null pointer");
+                assert_eq!(
+                    protocol_guid.as_mut().unwrap(),
+                    &device_path::PROTOCOL_GUID,
+                    "Protocol guid should have been Device Path guid"
+                );
                 let device_path_interface = interface as *mut *mut device_path::Protocol;
-                assert!(!device_path_interface.is_null(), "Interface should not be a null pointer");
 
                 *device_path_interface =
                     &DEVICE_PATH_PROTOCOL_INTERFACE as *const device_path::Protocol as *mut device_path::Protocol;
@@ -1527,20 +1528,21 @@ mod test {
         let boot_services = boot_services!(locate_protocol = efi_locate_protocol);
 
         extern "efiapi" fn efi_locate_protocol(
-            guid: *mut efi::Guid,
+            protocol_guid: *mut efi::Guid,
             registration: *mut c_void,
             interface: *mut *mut c_void,
         ) -> efi::Status {
             use r_efi::protocols::device_path;
             unsafe {
-                assert_eq!(
-                    guid.as_mut().unwrap(),
-                    &device_path::PROTOCOL_GUID,
-                    "Guid should have been Device Path guid"
-                );
+                assert!(!protocol_guid.is_null(), "Protocol guid should not be null");
                 assert!(registration.is_null(), "Registration should be a null pointer");
+                assert!(!interface.is_null(), "Interface should not be a null pointer");
+                assert_eq!(
+                    protocol_guid.as_mut().unwrap(),
+                    &device_path::PROTOCOL_GUID,
+                    "Protocol guid should have been Device Path guid"
+                );
                 let device_path_interface = interface as *mut *mut device_path::Protocol;
-                assert!(!device_path_interface.is_null(), "Interface should not be a null pointer");
 
                 // set to null to simulate an indicator protocol
                 *device_path_interface = core::ptr::null_mut() as *mut device_path::Protocol;
