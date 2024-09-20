@@ -34,10 +34,8 @@ use variable_services::{GetVariableStatus, VariableInfo};
 /// The UEFI spec runtime serivces.
 /// It wraps an [`AtomicPtr`] around [`efi::RuntimeServices`]
 ///
-/// UEFI Spec Documentation:
-/// <a href="https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html" target="_blank">
-///   8. Services - Runtime Services
-/// </a>
+/// UEFI Spec Documentation: [8. Services - RuntimeServices](https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html)
+///
 #[derive(Debug)]
 pub struct StandardRuntimeServices<'a> {
     efi_runtime_services: AtomicPtr<efi::RuntimeServices>,
@@ -96,10 +94,8 @@ unsafe impl Send for StandardRuntimeServices<'static> {}
 pub trait RuntimeServices: Sized {
     /// Sets a UEFI variable.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html#setvariable" target="_blank">
-    ///   8.2.3. EFI_RUNTIME_SERVICES.SetVariable()
-    /// </a>
+    /// UEFI Spec Documentation: [8.2.3. EFI_RUNTIME_SERVICES.SetVariable()](https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html#setvariable)
+    ///
     fn set_variable<T>(&self, name: &[u16], namespace: &efi::Guid, attributes: u32, data: &T) -> Result<(), efi::Status>
     where
         T: AsRef<[u8]> + 'static,
@@ -119,10 +115,8 @@ pub trait RuntimeServices: Sized {
     ///
     /// Returns a tuple of (data, attributes)
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html#getvariable" target="_blank">
-    ///   8.2.1. EFI_RUNTIME_SERVICES.GetVariable()
-    /// </a>
+    /// UEFI Spec Documentation: [8.2.1. EFI_RUNTIME_SERVICES.GetVariable()](https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html#getvariable)
+    ///
     fn get_variable<T>(
         &self,
         name: &[u16],
@@ -214,10 +208,8 @@ pub trait RuntimeServices: Sized {
     ///
     /// Note: Unlike get_variable, a non-null terminated name will return INVALID_PARAMETER per UEFI spec
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html#getnextvariablename" target="_blank">
-    ///   8.2.2. EFI_RUNTIME_SERVICES.GetNextVariableName()
-    /// </a>
+    /// UEFI Spec Documentation: [8.2.2. EFI_RUNTIME_SERVICES.GetNextVariableName()](https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html#getnextvariablename)
+    ///
     fn get_next_variable_name(
         &self,
         prev_name: &[u16],
@@ -240,10 +232,8 @@ pub trait RuntimeServices: Sized {
 
     /// Queries variable information for given UEFI variable attributes.
     ///
-    /// UEFI Spec Documentation:
-    /// <a href="https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html#queryvariableinfo" target="_blank">
-    ///   8.2.4. EFI_RUNTIME_SERVICES.QueryVariableInfo()
-    /// </a>
+    /// UEFI Spec Documentation: [8.2.4. EFI_RUNTIME_SERVICES.QueryVariableInfo()](https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html#queryvariableinfo)
+    ///
     fn query_variable_info(&self, attributes: u32) -> Result<VariableInfo, efi::Status>;
 
     /// Set's a UEFI variable
