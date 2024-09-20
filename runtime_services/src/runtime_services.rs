@@ -2,7 +2,7 @@
 
 extern crate alloc;
 
-pub mod variable_services;
+mod variable_services;
 
 #[cfg(any(test, feature = "mockall"))]
 use mockall::automock;
