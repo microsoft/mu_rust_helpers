@@ -1,4 +1,4 @@
-//! Rustified UEFI Runtime Service Wrappers
+//! Rust-friendly UEFI Runtime Service Wrappers
 //!
 //! Provides safe and unsafe easy-to-use wrappers for UEFI runtime services, as well as additional
 //! utilities and helper functions.
@@ -31,7 +31,7 @@ use core::{
 use r_efi::efi;
 use variable_services::{GetVariableStatus, VariableInfo};
 
-/// The UEFI spec runtime serivces.
+/// The UEFI spec runtime services.
 /// It wraps an [`AtomicPtr`] around [`efi::RuntimeServices`]
 ///
 /// UEFI Spec Documentation: [8. Services - RuntimeServices](https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html)
@@ -90,7 +90,7 @@ unsafe impl Send for StandardRuntimeServices<'static> {}
 
 #[cfg_attr(any(test, feature = "mockall"), automock)]
 
-/// Interface for "Rustified" wrappers of the UEFI Runtime Services
+/// Interface for Rust-friendly wrappers of the UEFI Runtime Services
 pub trait RuntimeServices: Sized {
     /// Sets a UEFI variable.
     ///
