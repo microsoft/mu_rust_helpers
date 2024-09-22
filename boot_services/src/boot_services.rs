@@ -1606,7 +1606,7 @@ mod test {
         let status = boot_services.free_pool(ptr::null_mut());
         assert_eq!(status, Err(efi::Status::INVALID_PARAMETER));
     }
-    
+
     #[test]
     fn test_locate_protocol() {
         const DEVICE_PATH_PROTOCOL: protocol_handler::DevicePath = protocol_handler::DevicePath {};
@@ -1628,10 +1628,9 @@ mod test {
                     &device_path::PROTOCOL_GUID,
                     "Protocol guid should have been Device Path guid"
                 );
-                let device_path_interface = interface as *mut *mut device_path::Protocol;
-
-                *device_path_interface =
-                    &DEVICE_PATH_PROTOCOL_INTERFACE as *const device_path::Protocol as *mut device_path::Protocol;
+                interface.write(
+                    &DEVICE_PATH_PROTOCOL_INTERFACE as *const device_path::Protocol as *const c_void as *mut c_void,
+                );
             }
 
             efi::Status::SUCCESS
@@ -1661,10 +1660,8 @@ mod test {
                     &device_path::PROTOCOL_GUID,
                     "Protocol guid should have been Device Path guid"
                 );
-                let device_path_interface = interface as *mut *mut device_path::Protocol;
-
                 // set to null to simulate an indicator protocol
-                *device_path_interface = core::ptr::null_mut() as *mut device_path::Protocol;
+                interface.write(core::ptr::null_mut());
             }
 
             efi::Status::SUCCESS
@@ -1673,5 +1670,4 @@ mod test {
         let result = boot_services.locate_protocol(&DEVICE_PATH_PROTOCOL, None);
         assert!(matches!(result, Ok(None)));
     }
-    
 }
