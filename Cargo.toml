@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "boot_services",
     "guid",
+    "runtime_services",
     "tpl_mutex"
 ]
 
@@ -20,6 +21,7 @@ include = [
 [workspace.dependencies]
 r-efi = "5.1.0"
 boot_services = { path="./boot_services" }
+runtime_services = { path="./runtime_services" }
 guid = { path="./guid" }
 tpl_mutex = { path="./tpl_mutex" }
 uuid = { version = "1.10.0", default-features = false}
@@ -34,18 +36,21 @@ edition.workspace = true
 include.workspace = true
 
 [features]
-default = ["boot_services", "guid", "tpl_mutex"]
+default = ["boot_services", "runtime_services", "guid", "tpl_mutex"]
 boot_services = ["dep:boot_services"]
+runtime_services = ["dep:runtime_services"]
 guid = ["dep:guid"]
 tpl_mutex = ["dep:tpl_mutex"]
 
 [dependencies]
 boot_services = { path = "./boot_services", version = "0.1.0", optional = true }
 guid = { path = "./guid", version = "0.1.0", optional = true }
+runtime_services = { path = "./runtime_services", version = "0.1.0", optional = true }
 tpl_mutex = { path = "./tpl_mutex", version = "0.1.0", optional = true }
 
 [dev-dependencies]
 r-efi = { workspace = true }
 boot_services = { path = "./boot_services", features = ["mockall"]}
+runtime_services = { path = "./runtime_services", features = ["mockall"]}
 
 
