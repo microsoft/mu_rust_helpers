@@ -2,6 +2,8 @@
 
 extern crate alloc;
 
+pub mod macros;
+
 #[cfg(feature = "boot_services")]
 pub use boot_services;
 
