@@ -32,7 +32,7 @@ log = "~0.4"
 
 [package]
 name = "mu_rust_helpers"
-version = "1.1.0"
+version = "1.2.0"
 description = ""
 repository.workspace = true
 license.workspace = true

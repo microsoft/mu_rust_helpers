@@ -23,6 +23,11 @@
   "words": [
     "aarch",
     "bitor",
+    "bitvec",
+    "cntfrq",
+    "cntpct",
+    "cpuid",
+    "ctable",
     "dereferenceable",
     "depex",
     "dxefv",
@@ -30,13 +35,19 @@
     "eficall",
     "GIGANTOR",
     "indoc",
+    "maxnp",
+    "nanos",
     "pointee",
+    "ptable",
+    "rdtsc",
     "rustc",
     "rustfmt",
+    "tiano",
     "uefi's",
     "uncacheable",
     "upvote",
     "withf",
-    "xffff"
+    "xffff",
+    "xxxxxxxxxb",
   ]
 }
