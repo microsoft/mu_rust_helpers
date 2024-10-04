@@ -1,0 +1,11 @@
+[package]
+name = "perf_timer"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+validate_cpu_features = []
+
+[target.'cfg(target_arch="aarch64")'.dependencies]
+aarch64-cpu = { version = "9.4.0", optional = false }

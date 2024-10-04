@@ -18,3 +18,6 @@ pub use tpl_mutex;
 
 #[cfg(feature = "uefi_decompress")]
 pub use uefi_decompress;
+
+#[cfg(feature = "perf_timer")]
+pub use perf_timer;
