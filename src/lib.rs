@@ -15,3 +15,6 @@ pub use guid;
 
 #[cfg(feature = "tpl_mutex")]
 pub use tpl_mutex;
+
+#[cfg(feature = "uefi_decompress")]
+pub use uefi_decompress;

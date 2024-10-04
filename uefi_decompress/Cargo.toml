@@ -1,0 +1,15 @@
+[package]
+name = "uefi_decompress"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "uefi_decompress"
+path = "src/lib.rs"
+
+[dependencies]
+log = { workspace = true }
+
+[dependencies.bitvec]
+version = "1"
+default-features = false
