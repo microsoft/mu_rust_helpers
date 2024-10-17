@@ -20,13 +20,13 @@ impl<T: BootServices> Deref for BootServicesGlobalAllocator<T> {
 impl<T: BootServices> BootServicesGlobalAllocator<T> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         match layout.align() {
-            0..=8 => self.allocate_pool(MemoryType::BootServicesData, layout.size()).unwrap_or(ptr::null_mut()),
+            0..=8 => self.allocate_pool(MemoryType::BOOT_SERVICES_DATA, layout.size()).unwrap_or(ptr::null_mut()),
             _ => {
                 let Ok((extended_layout, tracker_offset)) = layout.extend(Layout::new::<*mut *mut u8>()) else {
                     return ptr::null_mut();
                 };
                 let alloc_size = extended_layout.align() + extended_layout.size();
-                let Ok(original_ptr) = self.allocate_pool(MemoryType::BootServicesData, alloc_size) else {
+                let Ok(original_ptr) = self.allocate_pool(MemoryType::BOOT_SERVICES_DATA, alloc_size) else {
                     return ptr::null_mut();
                 };
                 let ptr = original_ptr.add(original_ptr.align_offset(extended_layout.align()));
