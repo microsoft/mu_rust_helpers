@@ -1,14 +1,14 @@
 #![cfg_attr(target_os = "uefi", no_std)]
 
 use r_efi::efi;
-use uuid::uuid;
+pub use uuid::uuid;
 
 /// Macro for creating an `efi::Guid` from string representation.
 /// This is a wrapper for `uuid!` from the uuid crate.
 #[macro_export]
 macro_rules! guid {
     ($guid_str:expr) => {
-        efi::Guid::from_bytes(&uuid!($guid_str).to_bytes_le())
+        efi::Guid::from_bytes(&$crate::uuid!($guid_str).to_bytes_le())
     };
 }
 
