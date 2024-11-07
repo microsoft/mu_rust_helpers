@@ -8,6 +8,7 @@ extern crate alloc;
 pub mod allocation;
 pub mod boxed;
 pub mod event;
+pub mod ffi_helper;
 pub mod protocol_handler;
 pub mod static_ptr;
 pub mod tpl;
@@ -25,6 +26,7 @@ use core::{
     ptr::{self, NonNull},
     sync::atomic::{AtomicPtr, Ordering},
 };
+use ffi_helper::{CMutRef, PtrMetadata};
 use static_ptr::{StaticPtr, StaticPtrMut};
 
 use r_efi::efi;
@@ -273,6 +275,41 @@ pub trait BootServices {
         unsafe { self.install_protocol_interface_unchecked(handle, protocol.protocol_guid(), interface_ptr) }
     }
 
+    fn install_protocol_marker<P>(&self, handle: Option<efi::Handle>, protocol: &P) -> Result<efi::Handle, efi::Status>
+    where
+        P: Protocol<Interface = ()> + 'static,
+    {
+        unsafe { self.install_protocol_interface_unchecked(handle, protocol.protocol_guid(), ptr::null_mut()) }
+    }
+
+    fn install_protocol_interface_2<P, R, I>(
+        &self,
+        handle: Option<efi::Handle>,
+        protocol: &P,
+        interface: R,
+    ) -> Result<(efi::Handle, PtrMetadata<'static, R>), efi::Status>
+    where
+        P: Protocol<Interface = I> + 'static,
+        R: CMutRef<'static, Type = I>,
+        I: 'static,
+    {
+        assert_ne!(
+            TypeId::of::<()>(),
+            TypeId::of::<I>(),
+            "Marker interface are not supported with this function, use install_protocol_marker"
+        );
+
+        let key = interface.metadata();
+        let handle = unsafe {
+            self.install_protocol_interface_unchecked(
+                handle,
+                protocol.protocol_guid(),
+                interface.into_mut_ptr() as *mut c_void,
+            )?
+        };
+        Ok((handle, key))
+    }
+
     /// Prefer normal [`BootServices::install_protocol_interface`] when possible.
     ///
     /// # Safety
@@ -301,6 +338,38 @@ pub trait BootServices {
         };
         //SAFETY: The generic Protocol ensure that the interface is the right type for the specified protocol.
         unsafe { self.uninstall_protocol_interface_unchecked(handle, protocol.protocol_guid(), interface_ptr) }
+    }
+
+    fn uninstall_protocol_marker<P>(&self, handle: efi::Handle, protocol: &P) -> Result<(), efi::Status>
+    where
+        P: Protocol<Interface = ()> + 'static,
+    {
+        unsafe { self.uninstall_protocol_interface_unchecked(handle, protocol.protocol_guid(), ptr::null_mut()) }?;
+        Ok(())
+    }
+
+    fn uninstall_protocol_interface_2<P, R, I>(
+        &self,
+        handle: efi::Handle,
+        protocol: &P,
+        key: PtrMetadata<'static, R>,
+    ) -> Result<R, efi::Status>
+    where
+        P: Protocol<Interface = I> + 'static,
+        R: CMutRef<'static, Type = I> + 'static,
+        I: 'static,
+    {
+        if TypeId::of::<R::Type>() == TypeId::of::<()>() {
+            assert_ne!(
+                TypeId::of::<()>(),
+                TypeId::of::<I>(),
+                "Marker interface are not supported with this function, use uninstall_protocol_marker"
+            );
+        }
+        unsafe {
+            self.uninstall_protocol_interface_unchecked(handle, protocol.protocol_guid(), key.ptr_value as *mut c_void)
+        }?;
+        Ok(unsafe { key.into_original_ptr() })
     }
 
     /// Prefer normal [`BootServices::uninstall_protocol_interface`] when possible.
@@ -342,6 +411,36 @@ pub trait BootServices {
                 new_protocol_interface_ptr,
             )
         }
+    }
+
+    fn reinstall_protocol_interface_2<P, O, N, I>(
+        &self,
+        handle: efi::Handle,
+        protocol: &P,
+        old_protocol_interface_key: PtrMetadata<'static, O>,
+        new_protocol_interface: N,
+    ) -> Result<(PtrMetadata<'static, N>, O), efi::Status>
+    where
+        P: Protocol<Interface = I> + 'static,
+        O: CMutRef<'static, Type = I>,
+        N: CMutRef<'static, Type = I>,
+        I: 'static,
+    {
+        assert_ne!(
+            TypeId::of::<()>(),
+            TypeId::of::<I>(),
+            "Marker interface are not supported with this function, use install_protocol_marker"
+        );
+        let new_key = new_protocol_interface.metadata();
+        unsafe {
+            self.reinstall_protocol_interface_unchecked(
+                handle,
+                protocol.protocol_guid(),
+                old_protocol_interface_key.ptr_value as *mut _,
+                new_protocol_interface.into_mut_ptr() as *mut _,
+            )?;
+        }
+        Ok((new_key, unsafe { old_protocol_interface_key.into_original_ptr() }))
     }
 
     /// Prefer normal [`BootServices::reinstall_protocol_interface`] when possible.
@@ -506,19 +605,66 @@ pub trait BootServices {
     /// Returns the first protocol instance that matches the given protocol.
     ///
     /// [UEFI Spec Documentation: 7.3.16. EFI_BOOT_SERVICES.LocateProtocol()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-locateprotocol)
-    fn locate_protocol<P: Protocol<Interface = I> + 'static, I: 'static>(
+    ///
+    /// # Safety
+    ///
+    /// Make sure to not create multiple mutable reference when using this api.
+    ///
+    unsafe fn locate_protocol<P, I>(
         &self,
         protocol: &P,
         registration: Option<Registration>,
-    ) -> Result<Option<&'static mut I>, efi::Status> {
+    ) -> Result<Option<&'static mut I>, efi::Status>
+    where
+        P: Protocol<Interface = I> + 'static,
+        I: Any + 'static,
+    {
         //SAFETY: The generic Protocol ensure that the interfaces is the right type for the specified protocol.
-        unsafe {
+        let interface_ptr = unsafe {
             self.locate_protocol_unchecked(
                 protocol.protocol_guid(),
                 registration.map_or(ptr::null_mut(), |r| r.as_ptr()),
-            )
-            .map(|ptr| if ptr.is_null() { None } else { Some((ptr as *mut I).as_mut().unwrap()) })
-        }
+            )? as *mut I
+        };
+        Ok(interface_ptr.as_mut())
+    }
+
+    unsafe fn locate_protocol_marker<P>(
+        &self,
+        protocol: &P,
+        registration: Option<Registration>,
+    ) -> Result<(), efi::Status>
+    where
+        P: Protocol<Interface = ()> + 'static,
+    {
+        //SAFETY: The generic Protocol ensure that the interfaces is the right type for the specified protocol.
+        let interface_ptr = unsafe {
+            self.locate_protocol_unchecked(
+                protocol.protocol_guid(),
+                registration.map_or(ptr::null_mut(), |r| r.as_ptr()),
+            )?
+        };
+        assert_eq!(ptr::null_mut(), interface_ptr);
+        Ok(())
+    }
+
+    unsafe fn locate_protocol_2<P, I>(
+        &self,
+        protocol: &P,
+        registration: Option<Registration>,
+    ) -> Result<&'static mut I, efi::Status>
+    where
+        P: Protocol<Interface = I> + 'static,
+        I: Any + 'static,
+    {
+        //SAFETY: The generic Protocol ensure that the interfaces is the right type for the specified protocol.
+        let interface_ptr = unsafe {
+            self.locate_protocol_unchecked(
+                protocol.protocol_guid(),
+                registration.map_or(ptr::null_mut(), |r| r.as_ptr()),
+            )? as *mut I
+        };
+        Ok(interface_ptr.as_mut().unwrap())
     }
 
     /// Prefer normal [`BootServices::locate_protocol`] when possible.
@@ -1889,7 +2035,7 @@ mod test {
             efi::Status::SUCCESS
         }
 
-        let result = boot_services.locate_protocol(&DEVICE_PATH_PROTOCOL, None);
+        let result = unsafe { boot_services.locate_protocol(&DEVICE_PATH_PROTOCOL, None) };
         assert!(matches!(result, Ok(Some(protocol)) if std::ptr::eq(protocol, &DEVICE_PATH_PROTOCOL_INTERFACE)));
     }
 
@@ -1920,7 +2066,7 @@ mod test {
             efi::Status::SUCCESS
         }
 
-        let result = boot_services.locate_protocol(&DEVICE_PATH_PROTOCOL, None);
+        let result = unsafe { boot_services.locate_protocol(&DEVICE_PATH_PROTOCOL, None) };
         assert!(matches!(result, Ok(None)));
     }
 

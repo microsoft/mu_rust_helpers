@@ -1,5 +1,7 @@
 use core::{
-    mem::ManuallyDrop,
+    ffi::c_void,
+    marker::PhantomData,
+    mem::{self, ManuallyDrop},
     ops::{Deref, DerefMut},
     pin::Pin,
     ptr,
@@ -7,14 +9,32 @@ use core::{
 
 use alloc::boxed::Box;
 
+#[derive(Debug, Clone, Copy)]
+pub struct StaticPtrMetadata<T: StaticPtr> {
+    pub ptr_value: usize,
+    _t: PhantomData<T>,
+}
+
 /// <div class="warning">
 ///
 /// This should be implemented **only** on type that have the same memory layout as `*mut T` and that can be recreated with [`core::mem::transmute`].
 ///
 /// </div>
-pub unsafe trait StaticPtr {
+pub unsafe trait StaticPtr: Sized + 'static {
     type Pointee: Sized + 'static;
+
     fn into_raw(self) -> *const Self::Pointee;
+
+    fn metadata(&self) -> StaticPtrMetadata<Self> {
+        StaticPtrMetadata {
+            ptr_value: unsafe { mem::transmute_copy(self) },
+            _t: PhantomData,
+        }
+    }
+
+    unsafe fn from_metadata(metadata: StaticPtrMetadata<Self>) -> Self {
+        mem::transmute_copy(&metadata.ptr_value)
+    }
 }
 
 /// <div class="warning">
@@ -24,6 +44,22 @@ pub unsafe trait StaticPtr {
 /// </div>
 pub unsafe trait StaticPtrMut: StaticPtr {
     fn into_raw_mut(self) -> *mut Self::Pointee;
+}
+
+// ()
+
+unsafe impl StaticPtr for () {
+    type Pointee = c_void;
+
+    fn into_raw(self) -> *const Self::Pointee {
+        ptr::null()
+    }
+}
+
+unsafe impl StaticPtrMut for () {
+    fn into_raw_mut(self) -> *mut Self::Pointee {
+        ptr::null_mut()
+    }
 }
 
 // &'static T
@@ -145,5 +181,27 @@ where
 {
     fn into_raw_mut(self) -> *mut Self::Pointee {
         Pin::into_inner(self).into_raw_mut()
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    use core::any::TypeId;
+
+    use super::StaticPtr;
+
+    #[test]
+    fn t() {
+        let a = Box::new(9);
+
+        let m = StaticPtr::metadata(&a);
+
+        println!("{:?}, {:?}", StaticPtr::into_raw(a) as usize, TypeId::of::<Box<i32>>());
+
+        println!("{:?}", m);
+
+        let b = unsafe { StaticPtr::from_metadata(m) };
+        println!("{:?}", b);
     }
 }
