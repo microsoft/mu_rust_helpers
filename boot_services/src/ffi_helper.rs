@@ -108,8 +108,6 @@ unsafe impl<'a, R: CMutPtr<'a, Type = T>, T> CMutPtr<'a> for ManuallyDrop<R> {}
 unsafe impl<'a, R: CRef<'a, Type = T>, T> CRef<'a> for ManuallyDrop<R> {}
 unsafe impl<'a, R: CMutRef<'a, Type = T>, T> CMutRef<'a> for ManuallyDrop<R> {}
 
-
-
 // impl<'a, T: Sized + 'a> CRef<'a> for &mut T {
 //     type Type = T;
 

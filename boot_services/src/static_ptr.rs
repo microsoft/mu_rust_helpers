@@ -26,10 +26,7 @@ pub unsafe trait StaticPtr: Sized + 'static {
     fn into_raw(self) -> *const Self::Pointee;
 
     fn metadata(&self) -> StaticPtrMetadata<Self> {
-        StaticPtrMetadata {
-            ptr_value: unsafe { mem::transmute_copy(self) },
-            _t: PhantomData,
-        }
+        StaticPtrMetadata { ptr_value: unsafe { mem::transmute_copy(self) }, _t: PhantomData }
     }
 
     unsafe fn from_metadata(metadata: StaticPtrMetadata<Self>) -> Self {
