@@ -290,7 +290,7 @@ pub trait BootServices {
     ) -> Result<(efi::Handle, PtrMetadata<'static, R>), efi::Status>
     where
         P: Protocol<Interface = I> + 'static,
-        R: CMutRef<'static, Type = I>,
+        R: CMutRef<'static, Type = I> + 'static,
         I: 'static,
     {
         assert_ne!(
@@ -422,8 +422,8 @@ pub trait BootServices {
     ) -> Result<(PtrMetadata<'static, N>, O), efi::Status>
     where
         P: Protocol<Interface = I> + 'static,
-        O: CMutRef<'static, Type = I>,
-        N: CMutRef<'static, Type = I>,
+        O: CMutRef<'static, Type = I> + 'static,
+        N: CMutRef<'static, Type = I> + 'static,
         I: 'static,
     {
         assert_ne!(
