@@ -22,7 +22,7 @@ use core::{
     marker::PhantomData,
     mem::{self, MaybeUninit},
     option::Option,
-    ptr,
+    ptr::{self, NonNull},
     sync::atomic::{AtomicPtr, Ordering},
 };
 use static_ptr::{StaticPtr, StaticPtrMut};
@@ -530,6 +530,76 @@ pub trait BootServices {
         protocol: &'static efi::Guid,
         registration: *mut c_void,
     ) -> Result<*mut c_void, efi::Status>;
+
+    /// Load an EFI image from a memory buffer.
+    /// 
+    /// This uses [`Self::load_image`] behind the scene. This function assume that the request is not originating from the boot manager. 
+    /// 
+    fn load_image_from_source(
+        &self,
+        parent_image_handle: efi::Handle,
+        device_path: *mut efi::protocols::device_path::Protocol,
+        source_buffer: &[u8],
+    ) -> Result<efi::Handle, efi::Status> {
+        self.load_image(false, parent_image_handle, device_path, Some(source_buffer))
+    }
+
+    /// Load an EFI image from a file.
+    /// 
+    /// This uses [`Self::load_image`] behind the scene. This function assume that the request is not originating from the boot manager. 
+    /// 
+    fn load_image_from_file(
+        &self,
+        parent_image_handle: efi::Handle,
+        file_device_path: NonNull<efi::protocols::device_path::Protocol>,
+    ) -> Result<efi::Handle, efi::Status> {
+        self.load_image(false, parent_image_handle, file_device_path.as_ptr(), None)
+    }
+
+    /// Loads an EFI image into memory.
+    ///
+    /// [UEFI Spec Documentation: 7.4.1. EFI_BOOT_SERVICES.LoadImage()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-loadimage)
+    /// 
+    fn load_image(
+        &self,
+        boot_policy: bool,
+        parent_image_handle: efi::Handle,
+        device_path: *mut efi::protocols::device_path::Protocol,
+        source_buffer: Option<&[u8]>,
+    ) -> Result<efi::Handle, efi::Status>;
+
+    /// Transfers control to a loaded image’s entry point.
+    ///
+    /// [UEFI Spec Documentation: 7.4.2. EFI_BOOT_SERVICES.StartImage()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-startimage)
+    /// 
+    fn start_image<'a>(
+        &'a self,
+        image_handle: efi::Handle,
+    ) -> Result<(), (efi::Status, Option<BootServicesBox<'a, [u8], Self>>)>;
+
+    /// Unloads an image.
+    ///
+    /// [UEFI Spec Documentation: 7.4.3. EFI_BOOT_SERVICES.UnloadImage()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-unloadimage)
+    /// 
+    fn unload_image(&self, image_handle: efi::Handle) -> Result<(), efi::Status>;
+
+    /// Terminates a loaded EFI image and returns control to boot services.
+    /// 
+    /// [UEFI Spec Documentation: 7.4.5. EFI_BOOT_SERVICES.Exit()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-exit)
+    /// 
+    fn exit<'a>(
+        &'a self,
+        image_handle: efi::Handle,
+        exit_status: efi::Status,
+        exit_data: Option<BootServicesBox<'a, [u8], Self>>,
+    ) -> Result<(), efi::Status>;
+
+    /// Terminates all boot services.
+    /// 
+    /// [UEFI Spec Documentation: EFI_BOOT_SERVICES.ExitBootServices()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-exitbootservices)
+    /// 
+    fn exit_boot_services(&self, image_handle: efi::Handle, map_key: usize) -> Result<(), efi::Status>;
+
 
     /// Sets the system’s watchdog timer.
     ///
@@ -1087,7 +1157,7 @@ impl BootServices for StandardBootServices<'_> {
     ) -> Result<(), efi::Status> {
         let disconnect_controller = self.efi_boot_services().disconnect_controller;
         if disconnect_controller as usize == 0 {
-            panic!("function not initialize.")
+            panic!("function not initialize.");
         }
         match disconnect_controller(
             controller_handle,
@@ -1102,7 +1172,7 @@ impl BootServices for StandardBootServices<'_> {
     fn protocols_per_handle(&self, handle: efi::Handle) -> Result<BootServicesBox<[efi::Guid], Self>, efi::Status> {
         let protocols_per_handle = self.efi_boot_services().protocols_per_handle;
         if protocols_per_handle as usize == 0 {
-            panic!("function not initialize.")
+            panic!("function not initialize.");
         }
 
         let mut protocol_buffer = ptr::null_mut();
@@ -1125,7 +1195,7 @@ impl BootServices for StandardBootServices<'_> {
     {
         let locate_handle_buffer = self.efi_boot_services().locate_handle_buffer;
         if locate_handle_buffer as usize == 0 {
-            panic!("function not initialize.")
+            panic!("function not initialize.");
         }
 
         let mut buffer = ptr::null_mut();
@@ -1159,12 +1229,105 @@ impl BootServices for StandardBootServices<'_> {
     ) -> Result<*mut c_void, efi::Status> {
         let locate_protocol = self.efi_boot_services().locate_protocol;
         if locate_protocol as usize == 0 {
-            panic!("function not initialize.")
+            panic!("function not initialize.");
         }
         let mut interface = ptr::null_mut();
         match locate_protocol(protocol as *const _ as *mut _, registration, ptr::addr_of_mut!(interface)) {
             s if s.is_error() => Err(s),
             _ => Ok(interface),
+        }
+    }
+
+    fn load_image(
+        &self,
+        boot_policy: bool,
+        parent_image_handle: efi::Handle,
+        device_path: *mut efi::protocols::device_path::Protocol,
+        source_buffer: Option<&[u8]>,
+    ) -> Result<efi::Handle, efi::Status> {
+        let load_image = self.efi_boot_services().load_image;
+        if load_image as usize == 0 {
+            panic!("function not initialize.");
+        }
+        let source_buffer_ptr =
+            source_buffer.map_or(ptr::null_mut(), |buffer| buffer.as_ptr() as *const _ as *mut c_void);
+        let source_buffer_size = source_buffer.map_or(0, |buffer| buffer.len());
+        let mut image_handle = MaybeUninit::uninit();
+        match load_image(
+            boot_policy.into(),
+            parent_image_handle,
+            device_path,
+            source_buffer_ptr,
+            source_buffer_size,
+            image_handle.as_mut_ptr(),
+        ) {
+            s if s.is_error() => Err(s),
+            _ => Ok(unsafe { image_handle.assume_init() }),
+        }
+    }
+
+    fn start_image<'a>(
+        &'a self,
+        image_handle: efi::Handle,
+    ) -> Result<(), (efi::Status, Option<BootServicesBox<'a, [u8], Self>>)> {
+        let start_image = self.efi_boot_services().start_image;
+        if start_image as usize == 0 {
+            panic!("function not initialize.");
+        }
+        let mut exit_data_size = MaybeUninit::uninit();
+        let mut exit_data = MaybeUninit::uninit();
+        match start_image(image_handle, exit_data_size.as_mut_ptr(), exit_data.as_mut_ptr()) {
+            s if s.is_error() => {
+                let data = (exit_data.as_ptr() == ptr::null()).then(|| unsafe {
+                    BootServicesBox::from_raw_parts(
+                        exit_data.as_mut_ptr() as *mut u8,
+                        exit_data_size.assume_init(),
+                        self,
+                    )
+                });
+                Err((s, data))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn unload_image(&self, image_handle: efi::Handle) -> Result<(), efi::Status> {
+        let unload_image = self.efi_boot_services().unload_image;
+        if unload_image as usize == 0 {
+            panic!("function not initialize.");
+        }
+        match unload_image(image_handle) {
+            s if s.is_error() => Err(s),
+            _ => Ok(()),
+        }
+    }
+
+    fn exit<'a>(
+        &'a self,
+        image_handle: efi::Handle,
+        exit_status: efi::Status,
+        exit_data: Option<BootServicesBox<'a, [u8], Self>>,
+    ) -> Result<(), efi::Status> {
+        let exit = self.efi_boot_services().exit;
+        if exit as usize == 0 {
+            panic!("function not initialize.");
+        }
+        let exit_data_ptr = exit_data.as_ref().map_or(ptr::null_mut(), |data| data.as_ptr() as *mut u16);
+        let exit_data_size = exit_data.as_ref().map_or(0, |data| data.len());
+        match exit(image_handle, exit_status, exit_data_size, exit_data_ptr) {
+            s if s.is_error() => Err(s),
+            _ => Ok(()),
+        }
+    }
+
+    fn exit_boot_services(&self, image_handle: efi::Handle, map_key: usize) -> Result<(), efi::Status> {
+        let exit_boot_services = self.efi_boot_services().exit_boot_services;
+        if exit_boot_services as usize == 0 {
+            panic!("function not initialize.");
+        }
+        match exit_boot_services(image_handle, map_key) {
+            s if s.is_error() => Err(s),
+            _ => Ok(()),
         }
     }
 
@@ -1181,6 +1344,7 @@ impl BootServices for StandardBootServices<'_> {
             _ => Ok(()),
         }
     }
+
 
     unsafe fn copy_mem_unchecked(&self, dest: *mut c_void, src: *const c_void, length: usize) {
         efi_boot_services_fn!(self.efi_boot_services(), copy_mem)(dest, src as *mut _, length);
