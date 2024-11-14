@@ -1278,7 +1278,8 @@ impl BootServices for StandardBootServices<'_> {
         let mut exit_data = MaybeUninit::uninit();
         match start_image(image_handle, exit_data_size.as_mut_ptr(), exit_data.as_mut_ptr()) {
             s if s.is_error() => {
-                let data = (exit_data.as_ptr() == ptr::null()).then(|| unsafe {
+                let data = (!exit_data.as_ptr().is_null()).then(|| unsafe {
+
                     BootServicesBox::from_raw_parts(
                         exit_data.as_mut_ptr() as *mut u8,
                         exit_data_size.assume_init(),
