@@ -8,7 +8,7 @@ use core::{
 use crate::{allocation::MemoryType, BootServices};
 
 #[derive(Debug)]
-pub struct BootServicesBox<'a, T: ?Sized, B: BootServices> {
+pub struct BootServicesBox<'a, T: ?Sized, B: BootServices + ?Sized> {
     ptr: *mut T,
     boot_services: &'a B,
 }
@@ -47,7 +47,7 @@ impl<'a, T, B: BootServices> BootServicesBox<'a, [T], B> {
     }
 }
 
-impl<T: ?Sized, B: BootServices> Drop for BootServicesBox<'_, T, B> {
+impl<T: ?Sized, B: BootServices + ?Sized> Drop for BootServicesBox<'_, T, B> {
     fn drop(&mut self) {
         let _ = self.boot_services.free_pool(self.ptr as *mut u8);
     }
