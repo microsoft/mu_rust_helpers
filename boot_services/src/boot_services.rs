@@ -88,7 +88,7 @@ unsafe impl Send for StandardBootServices<'static> {}
 
 /// Functions that are available *before* a successful call to EFI_BOOT_SERVICES.ExitBootServices().
 #[cfg_attr(any(test, feature = "mockall"), automock)]
-pub trait BootServices: Sized {
+pub trait BootServices {
     /// Create an event.
     ///
     /// [UEFI Spec Documentation: 7.1.1. EFI_BOOT_SERVICES.CreateEvent()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-createevent)
@@ -278,7 +278,7 @@ pub trait BootServices: Sized {
     /// # Safety
     ///
     /// When calling this method, you have to make sure that if *interface* pointer is non-null, it is adhereing to
-    /// the structure associated with the protocol.  
+    /// the structure associated with the protocol.
     unsafe fn install_protocol_interface_unchecked(
         &self,
         handle: Option<efi::Handle>,
@@ -348,7 +348,7 @@ pub trait BootServices: Sized {
     ///
     /// # Safety
     /// When calling this method, you have to make sure that if *new_protocol_interface* pointer is non-null, it is adhereing to
-    /// the structure associated with the protocol.  
+    /// the structure associated with the protocol.
     unsafe fn reinstall_protocol_interface_unchecked(
         &self,
         handle: efi::Handle,
@@ -432,7 +432,7 @@ pub trait BootServices: Sized {
     ///
     /// # Safety
     ///
-    /// When calling this method, you have to make sure that if *agent_handle* pointer is non-null.  
+    /// When calling this method, you have to make sure that if *agent_handle* pointer is non-null.
     unsafe fn open_protocol_unchecked(
         &self,
         handle: efi::Handle,
@@ -467,7 +467,7 @@ pub trait BootServices: Sized {
     /// # Safety
     ///
     /// When calling this method, you have to make sure that *driver_image_handle*'s last entry is null per UEFI specification.
-    ///  
+    ///
     /// [UEFI Spec Documentation: 7.3.12. EFI_BOOT_SERVICES.ConnectController()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-connectcontroller)
     unsafe fn connect_controller(
         &self,

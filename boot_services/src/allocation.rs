@@ -41,7 +41,7 @@ impl Into<u32> for MemoryType {
 }
 
 #[derive(Debug)]
-pub struct MemoryMap<'a, B: BootServices> {
+pub struct MemoryMap<'a, B: BootServices + ?Sized> {
     pub descriptors: BootServicesBox<'a, [efi::MemoryDescriptor], B>,
     pub map_key: usize,
     pub descriptor_version: u32,
