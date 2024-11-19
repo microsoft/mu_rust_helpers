@@ -531,6 +531,44 @@ pub trait BootServices {
         registration: *mut c_void,
     ) -> Result<*mut c_void, efi::Status>;
 
+    /// Sets the system’s watchdog timer.
+    ///
+    /// Note:  
+    /// We deliberately choose to ignore the watchdog code and data parameters because we are not using them.
+    /// Feel free to add those if needed.
+    ///
+    /// [UEFI Spec Documentation: 7.5.1. EFI_BOOT_SERVICES.SetWatchdogTimer()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-setwatchdogtimer)
+    fn set_watchdog_timer(&self, timeout: usize) -> Result<(), efi::Status>;
+
+    /// Induces a fine-grained stall
+    ///
+    /// [UEFI Spec Documentation: 7.5.2. EFI_BOOT_SERVICES.Stall()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-stall)
+    fn stall(&self, microseconds: usize) -> Result<(), efi::Status>;
+
+    /// Copies the contents of one buffer to another buffer.
+    ///
+    /// [UEFI Spec Documentation: 7.5.3. EFI_BOOT_SERVICES.CopyMem()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-copymem)
+    fn copy_mem<T: 'static>(&self, dest: &mut T, src: &T) {
+        unsafe { self.copy_mem_unchecked(dest as *mut T as _, src as *const T as _, mem::size_of::<T>()) }
+    }
+
+    /// Use of [`Self::copy_mem`] is preferable if the context allows it.
+    ///
+    /// # Safety
+    ///
+    /// dest and src must be valid pointer to a continuous chunk of memory of size length.
+    unsafe fn copy_mem_unchecked(&self, dest: *mut c_void, src: *const c_void, length: usize);
+
+    /// Fills a buffer with a specified value.
+    ///
+    /// [UEFI Spec Documentation: 7.5.4. EFI_BOOT_SERVICES.SetMem()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-setmem)
+    fn set_mem(&self, buffer: &mut [u8], value: u8);
+
+    /// Returns a monotonically increasing count for the platform.
+    ///
+    /// [UEFI Spec Documentation: 7.5.5. EFI_BOOT_SERVICES.GetNextMonotonicCount()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-getnextmonotoniccount)
+    fn get_next_monotonic_count(&self) -> Result<u64, efi::Status>;
+
     /// Adds, updates, or removes a configuration table entry from the EFI System Table.
     ///
     /// [UEFI Spec Documentation: 7.5.6. EFI_BOOT_SERVICES.InstallConfigurationTable()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-installconfigurationtable)
@@ -542,15 +580,34 @@ pub trait BootServices {
         unsafe { self.install_configuration_table_unchecked(guid, table.into_raw_mut() as *mut c_void) }
     }
 
-    /// Prefer normal [`BootServices::install_configuration_table`] when possible.
+    /// Use [`BootServices::install_configuration_table`] when possible.
     ///
     /// # Safety
     ///
+    /// The table pointer must be the right type associated with the guid.
     unsafe fn install_configuration_table_unchecked(
         &self,
         guid: &efi::Guid,
         table: *mut c_void,
     ) -> Result<(), efi::Status>;
+
+    /// Computes and returns a 32-bit CRC for a data buffer.
+    ///
+    /// [UEFI Spec Documentation: 7.5.7. EFI_BOOT_SERVICES.CalculateCrc32()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-calculatecrc32)
+    fn calculate_crc_32<T: 'static>(&self, data: &T) -> Result<u32, efi::Status> {
+        unsafe { self.calculate_crc_32_unchecked(data as *const T as _, mem::size_of::<T>()) }
+    }
+
+    unsafe fn calculate_crc_32_unchecked(&self, data: *const c_void, data_size: usize) -> Result<u32, efi::Status>;
+}
+
+macro_rules! efi_boot_services_fn {
+    ($efi_boot_services:expr, $fn_name:ident) => {{
+        match $efi_boot_services.$fn_name {
+            f if f as usize == 0 => panic!("Boot services function {} is not initialized.", stringify!($fn_name)),
+            f => f,
+        }
+    }};
 }
 
 impl BootServices for StandardBootServices<'_> {
@@ -1111,28 +1168,71 @@ impl BootServices for StandardBootServices<'_> {
         }
     }
 
+    fn set_watchdog_timer(&self, timeout: usize) -> Result<(), efi::Status> {
+        match efi_boot_services_fn!(self.efi_boot_services(), set_watchdog_timer)(timeout, 0, 0, ptr::null_mut()) {
+            s if s.is_error() => Err(s),
+            _ => Ok(()),
+        }
+    }
+
+    fn stall(&self, microseconds: usize) -> Result<(), efi::Status> {
+        match efi_boot_services_fn!(self.efi_boot_services(), stall)(microseconds) {
+            s if s.is_error() => Err(s),
+            _ => Ok(()),
+        }
+    }
+
+    unsafe fn copy_mem_unchecked(&self, dest: *mut c_void, src: *const c_void, length: usize) {
+        efi_boot_services_fn!(self.efi_boot_services(), copy_mem)(dest, src as *mut _, length);
+    }
+
+    fn set_mem(&self, buffer: &mut [u8], value: u8) {
+        efi_boot_services_fn!(self.efi_boot_services(), set_mem)(
+            buffer.as_mut_ptr() as *mut c_void,
+            buffer.len(),
+            value,
+        );
+    }
+
+    fn get_next_monotonic_count(&self) -> Result<u64, efi::Status> {
+        let mut count = MaybeUninit::uninit();
+        match efi_boot_services_fn!(self.efi_boot_services(), get_next_monotonic_count)(count.as_mut_ptr()) {
+            s if s.is_error() => Err(s),
+            _ => Ok(unsafe { count.assume_init() }),
+        }
+    }
+
     unsafe fn install_configuration_table_unchecked(
         &self,
         guid: &efi::Guid,
         table: *mut c_void,
     ) -> Result<(), efi::Status> {
-        let install_configuration_table = self.efi_boot_services().install_configuration_table;
-        if install_configuration_table as usize == 0 {
-            panic!("function not initialize.")
-        }
-        match install_configuration_table(guid as *const _ as *mut _, table) {
+        match efi_boot_services_fn!(self.efi_boot_services(), install_configuration_table)(
+            guid as *const _ as *mut _,
+            table,
+        ) {
             s if s.is_error() => Err(s),
             _ => Ok(()),
+        }
+    }
+
+    unsafe fn calculate_crc_32_unchecked(&self, data: *const c_void, data_size: usize) -> Result<u32, efi::Status> {
+        let mut crc32 = MaybeUninit::uninit();
+        match efi_boot_services_fn!(self.efi_boot_services(), calculate_crc32)(
+            data as *mut _,
+            data_size,
+            crc32.as_mut_ptr(),
+        ) {
+            s if s.is_error() => Err(s),
+            _ => Ok(unsafe { crc32.assume_init() }),
         }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use efi;
-
     use super::*;
-    use core::{mem::MaybeUninit, sync::atomic::AtomicUsize};
+    use core::{mem::MaybeUninit, sync::atomic::AtomicUsize, u64};
 
     macro_rules! boot_services {
     ($($efi_services:ident = $efi_service_fn:ident),*) => {{
@@ -1741,5 +1841,172 @@ mod test {
                 assert!(false, "Error: {:?}", status);
             }
         }
+    }
+
+    #[test]
+    #[should_panic = "Boot services function set_watchdog_timer is not initialized."]
+    fn test_set_watchdog_timer_not_init() {
+        let boot_services = boot_services!();
+        _ = boot_services.set_watchdog_timer(0)
+    }
+
+    #[test]
+    fn test_set_watchdog_timer() {
+        let boot_services = boot_services!(set_watchdog_timer = efi_set_watchdog_timer);
+
+        extern "efiapi" fn efi_set_watchdog_timer(
+            timeout: usize,
+            watchdog_code: u64,
+            data_size: usize,
+            watchdog_data: *mut u16,
+        ) -> efi::Status {
+            assert_eq!(10, timeout);
+            assert_eq!(0, watchdog_code);
+            assert_eq!(0, data_size);
+            assert_eq!(ptr::null_mut(), watchdog_data);
+            efi::Status::SUCCESS
+        }
+
+        boot_services.set_watchdog_timer(10).unwrap();
+    }
+
+    #[test]
+    #[should_panic = "Boot services function stall is not initialized."]
+    fn test_stall_not_init() {
+        let boot_services = boot_services!();
+        _ = boot_services.stall(0);
+    }
+
+    #[test]
+    fn test_stall() {
+        let boot_services = boot_services!(stall = efi_stall);
+        extern "efiapi" fn efi_stall(microsecondes: usize) -> efi::Status {
+            assert_eq!(10, microsecondes);
+            efi::Status::SUCCESS
+        }
+        let status = boot_services.stall(10);
+        assert_eq!(Ok(()), status);
+    }
+
+    #[test]
+    #[should_panic = "Boot services function copy_mem is not initialized."]
+    fn test_copy_mem_not_init() {
+        let boot_services = boot_services!();
+        let mut dest = 0;
+        let src = 0;
+        boot_services.copy_mem(&mut dest, &src);
+    }
+
+    #[test]
+    #[allow(static_mut_refs)]
+    fn test_copy_mem() {
+        let boot_services = boot_services!(copy_mem = efi_copy_mem);
+
+        static A: [i32; 5] = [1, 2, 3, 4, 5];
+        static mut B: [i32; 5] = [0; 5];
+
+        extern "efiapi" fn efi_copy_mem(dest: *mut c_void, src: *mut c_void, length: usize) {
+            assert_eq!(unsafe { ptr::addr_of!(B) } as usize, dest as usize);
+            assert_eq!(ptr::addr_of!(A) as usize, src as usize);
+            assert_eq!(5 * mem::size_of::<i32>(), length);
+        }
+        boot_services.copy_mem(unsafe { &mut B }, &A);
+    }
+
+    #[test]
+    #[should_panic = "Boot services function set_mem is not initialized."]
+    fn test_set_mem_not_init() {
+        let boot_services = boot_services!();
+        _ = boot_services.set_mem(&mut [0], 0);
+    }
+
+    #[test]
+    #[allow(static_mut_refs)]
+    fn test_set_mem() {
+        let boot_services = boot_services!(set_mem = efi_set_mem);
+
+        static mut BUFFER: [u8; 16] = [0; 16];
+
+        extern "efiapi" fn efi_set_mem(buffer: *mut c_void, size: usize, value: u8) {
+            assert_eq!(unsafe { ptr::addr_of!(BUFFER) } as usize, buffer as usize);
+            assert_eq!(16, size);
+            assert_eq!(8, value);
+        }
+        _ = boot_services.set_mem(unsafe { &mut BUFFER }, 8);
+    }
+
+    #[test]
+    #[should_panic = "Boot services function get_next_monotonic_count is not initialized."]
+    fn test_get_next_monotonic_count_not_init() {
+        let boot_services = boot_services!();
+        _ = boot_services.get_next_monotonic_count();
+    }
+
+    #[test]
+    fn test_get_next_monotonic_count() {
+        let boot_services = boot_services!(get_next_monotonic_count = efi_get_next_monotonic_count);
+        extern "efiapi" fn efi_get_next_monotonic_count(count: *mut u64) -> efi::Status {
+            unsafe { ptr::write(count, 89) };
+            efi::Status::SUCCESS
+        }
+        let status = boot_services.get_next_monotonic_count().unwrap();
+        assert_eq!(89, status);
+    }
+
+    #[test]
+    #[should_panic = "Boot services function install_configuration_table is not initialized."]
+    fn test_install_configuration_table_not_init() {
+        let boot_services = boot_services!();
+        let table = Box::new(());
+        _ = boot_services.install_configuration_table(&efi::Guid::from_bytes(&[0; 16]), table);
+    }
+
+    #[test]
+    fn test_install_configuration_table() {
+        let boot_services = boot_services!(install_configuration_table = efi_install_configuration_table);
+
+        static GUID: efi::Guid = efi::Guid::from_bytes(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+        static mut TABLE: i32 = 10;
+
+        extern "efiapi" fn efi_install_configuration_table(guid: *mut efi::Guid, table: *mut c_void) -> efi::Status {
+            assert_eq!(ptr::addr_of!(GUID) as usize, guid as usize);
+            assert_eq!(unsafe { ptr::addr_of!(TABLE) } as usize, table as usize);
+            assert_eq!(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], unsafe { ptr::read(guid) }.as_bytes());
+            assert_eq!(10, unsafe { ptr::read(table as *mut i32) });
+            efi::Status::SUCCESS
+        }
+
+        #[allow(static_mut_refs)]
+        boot_services.install_configuration_table(&GUID, unsafe { &mut TABLE }).unwrap();
+    }
+
+    #[test]
+    #[should_panic = "Boot services function calculate_crc32 is not initialized."]
+    fn test_calculate_crc32_not_init() {
+        let boot_services = boot_services!();
+        _ = boot_services.calculate_crc_32(&[0]);
+    }
+
+    #[test]
+    fn test_calculate_crc32() {
+        let boot_services = boot_services!(calculate_crc32 = efi_calculate_crc32);
+
+        static BUFFER: [u8; 16] = [0; 16];
+
+        extern "efiapi" fn efi_calculate_crc32(
+            buffer_ptr: *mut c_void,
+            buffer_size: usize,
+            crc: *mut u32,
+        ) -> efi::Status {
+            unsafe {
+                assert_eq!(ptr::addr_of!(BUFFER) as usize, buffer_ptr as usize);
+                assert_eq!(BUFFER.len(), buffer_size);
+                ptr::write(crc, 10)
+            }
+            efi::Status::SUCCESS
+        }
+
+        let crc = boot_services.calculate_crc_32(&BUFFER).unwrap();
+        assert_eq!(10, crc);
     }
 }
