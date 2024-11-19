@@ -560,12 +560,12 @@ pub trait BootServices {
     ///
     /// [UEFI Spec Documentation: 7.4.1. EFI_BOOT_SERVICES.LoadImage()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-loadimage)
     /// 
-    fn load_image(
+    fn load_image<'a>(
         &self,
         boot_policy: bool,
         parent_image_handle: efi::Handle,
         device_path: *mut efi::protocols::device_path::Protocol,
-        source_buffer: Option<&[u8]>,
+        source_buffer: Option<&'a [u8]>,
     ) -> Result<efi::Handle, efi::Status>;
 
     /// Transfers control to a loaded image’s entry point.
