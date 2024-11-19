@@ -601,6 +601,15 @@ pub trait BootServices: Sized {
     unsafe fn calculate_crc_32_unchecked(&self, data: *const c_void, data_size: usize) -> Result<u32, efi::Status>;
 }
 
+macro_rules! efi_boot_services_fn {
+    ($efi_boot_services:expr, $fn_name:ident) => {{
+        match $efi_boot_services.$fn_name {
+            f if f as usize == 0 => panic!("Boot services function {} is not initialized.", stringify!($fn_name)),
+            f => f,
+        }
+    }};
+}
+
 impl BootServices for StandardBootServices<'_> {
     unsafe fn create_event_unchecked<T: Sized + 'static>(
         &self,
@@ -1160,50 +1169,34 @@ impl BootServices for StandardBootServices<'_> {
     }
 
     fn set_watchdog_timer(&self, timeout: usize) -> Result<(), efi::Status> {
-        let set_watchdog_timer = self.efi_boot_services().set_watchdog_timer;
-        if set_watchdog_timer as usize == 0 {
-            panic!("function not initialize.")
-        }
-        match set_watchdog_timer(timeout, 0, 0, ptr::null_mut()) {
+        match efi_boot_services_fn!(self.efi_boot_services(), set_watchdog_timer)(timeout, 0, 0, ptr::null_mut()) {
             s if s.is_error() => Err(s),
             _ => Ok(()),
         }
     }
 
     fn stall(&self, microseconds: usize) -> Result<(), efi::Status> {
-        let stall = self.efi_boot_services().stall;
-        if stall as usize == 0 {
-            panic!("function not initialize.")
-        }
-        match stall(microseconds) {
+        match efi_boot_services_fn!(self.efi_boot_services(), stall)(microseconds) {
             s if s.is_error() => Err(s),
             _ => Ok(()),
         }
     }
 
     unsafe fn copy_mem_unchecked(&self, dest: *mut c_void, src: *const c_void, length: usize) {
-        let copy_mem = self.efi_boot_services().copy_mem;
-        if copy_mem as usize == 0 {
-            panic!("function not initialize.")
-        }
-        copy_mem(dest, src as *mut _, length);
+        efi_boot_services_fn!(self.efi_boot_services(), copy_mem)(dest, src as *mut _, length);
     }
 
     fn set_mem(&self, buffer: &mut [u8], value: u8) {
-        let set_mem = self.efi_boot_services().set_mem;
-        if set_mem as usize == 0 {
-            panic!("function not initialize.")
-        }
-        set_mem(buffer.as_mut_ptr() as *mut c_void, buffer.len(), value);
+        efi_boot_services_fn!(self.efi_boot_services(), set_mem)(
+            buffer.as_mut_ptr() as *mut c_void,
+            buffer.len(),
+            value,
+        );
     }
 
     fn get_next_monotonic_count(&self) -> Result<u64, efi::Status> {
-        let get_next_monotonic_count = self.efi_boot_services().get_next_monotonic_count;
-        if get_next_monotonic_count as usize == 0 {
-            panic!("function not initialize.")
-        }
         let mut count = MaybeUninit::uninit();
-        match get_next_monotonic_count(count.as_mut_ptr()) {
+        match efi_boot_services_fn!(self.efi_boot_services(), get_next_monotonic_count)(count.as_mut_ptr()) {
             s if s.is_error() => Err(s),
             _ => Ok(unsafe { count.assume_init() }),
         }
@@ -1214,23 +1207,22 @@ impl BootServices for StandardBootServices<'_> {
         guid: &efi::Guid,
         table: *mut c_void,
     ) -> Result<(), efi::Status> {
-        let install_configuration_table = self.efi_boot_services().install_configuration_table;
-        if install_configuration_table as usize == 0 {
-            panic!("function not initialize.")
-        }
-        match install_configuration_table(guid as *const _ as *mut _, table) {
+        match efi_boot_services_fn!(self.efi_boot_services(), install_configuration_table)(
+            guid as *const _ as *mut _,
+            table,
+        ) {
             s if s.is_error() => Err(s),
             _ => Ok(()),
         }
     }
 
     unsafe fn calculate_crc_32_unchecked(&self, data: *const c_void, data_size: usize) -> Result<u32, efi::Status> {
-        let calculate_crc_32 = self.efi_boot_services().calculate_crc32;
-        if calculate_crc_32 as usize == 0 {
-            panic!("function not initialize.")
-        }
         let mut crc32 = MaybeUninit::uninit();
-        match calculate_crc_32(data as *mut _, data_size, crc32.as_mut_ptr()) {
+        match efi_boot_services_fn!(self.efi_boot_services(), calculate_crc32)(
+            data as *mut _,
+            data_size,
+            crc32.as_mut_ptr(),
+        ) {
             s if s.is_error() => Err(s),
             _ => Ok(unsafe { crc32.assume_init() }),
         }
@@ -1852,7 +1844,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic = "function not initialize."]
+    #[should_panic = "Boot services function set_watchdog_timer is not initialized."]
     fn test_set_watchdog_timer_not_init() {
         let boot_services = boot_services!();
         _ = boot_services.set_watchdog_timer(0)
@@ -1879,7 +1871,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic = "function not initialize."]
+    #[should_panic = "Boot services function stall is not initialized."]
     fn test_stall_not_init() {
         let boot_services = boot_services!();
         _ = boot_services.stall(0);
@@ -1897,7 +1889,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic = "function not initialize."]
+    #[should_panic = "Boot services function copy_mem is not initialized."]
     fn test_copy_mem_not_init() {
         let boot_services = boot_services!();
         let mut dest = 0;
@@ -1922,7 +1914,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic = "function not initialize."]
+    #[should_panic = "Boot services function set_mem is not initialized."]
     fn test_set_mem_not_init() {
         let boot_services = boot_services!();
         _ = boot_services.set_mem(&mut [0], 0);
@@ -1944,7 +1936,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic = "function not initialize."]
+    #[should_panic = "Boot services function get_next_monotonic_count is not initialized."]
     fn test_get_next_monotonic_count_not_init() {
         let boot_services = boot_services!();
         _ = boot_services.get_next_monotonic_count();
@@ -1962,7 +1954,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic = "function not initialize."]
+    #[should_panic = "Boot services function install_configuration_table is not initialized."]
     fn test_install_configuration_table_not_init() {
         let boot_services = boot_services!();
         let table = Box::new(());
@@ -1989,7 +1981,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic = "function not initialize."]
+    #[should_panic = "Boot services function calculate_crc32 is not initialized."]
     fn test_calculate_crc32_not_init() {
         let boot_services = boot_services!();
         _ = boot_services.calculate_crc_32(&[0]);
