@@ -1156,7 +1156,7 @@ impl BootServices for StandardBootServices<'_> {
     ) -> Result<(), efi::Status> {
         let disconnect_controller = self.efi_boot_services().disconnect_controller;
         if disconnect_controller as usize == 0 {
-            panic!("function not initialize.");
+            panic!("function not initialize.")
         }
         match disconnect_controller(
             controller_handle,
@@ -1171,7 +1171,7 @@ impl BootServices for StandardBootServices<'_> {
     fn protocols_per_handle(&self, handle: efi::Handle) -> Result<BootServicesBox<[efi::Guid], Self>, efi::Status> {
         let protocols_per_handle = self.efi_boot_services().protocols_per_handle;
         if protocols_per_handle as usize == 0 {
-            panic!("function not initialize.");
+            panic!("function not initialize.")
         }
 
         let mut protocol_buffer = ptr::null_mut();
@@ -1194,7 +1194,7 @@ impl BootServices for StandardBootServices<'_> {
     {
         let locate_handle_buffer = self.efi_boot_services().locate_handle_buffer;
         if locate_handle_buffer as usize == 0 {
-            panic!("function not initialize.");
+            panic!("function not initialize.")
         }
 
         let mut buffer = ptr::null_mut();
@@ -1228,7 +1228,7 @@ impl BootServices for StandardBootServices<'_> {
     ) -> Result<*mut c_void, efi::Status> {
         let locate_protocol = self.efi_boot_services().locate_protocol;
         if locate_protocol as usize == 0 {
-            panic!("function not initialize.");
+            panic!("function not initialize.")
         }
         let mut interface = ptr::null_mut();
         match locate_protocol(protocol as *const _ as *mut _, registration, ptr::addr_of_mut!(interface)) {
