@@ -664,6 +664,7 @@ pub trait BootServices {
                 registration.map_or(ptr::null_mut(), |r| r.as_ptr()),
             )? as *mut I
         };
+        // todo add  error message
         Ok(interface_ptr.as_mut().unwrap())
     }
 
@@ -2007,6 +2008,176 @@ mod test {
     }
 
     #[test]
+    fn test_install_protocol_interface_not_init() {
+        todo!()
+    }
+
+    #[test]
+    fn test_install_protocol_interface() {
+        todo!()
+    }
+
+    #[test]
+    fn test_install_protocol_marker_not_init() {
+        todo!()
+    }
+
+    #[test]
+    fn test_install_protocol_marker() {
+        todo!()
+    }
+
+    #[test]
+    fn test_uninstall_protocol_interface_not_init() {
+        todo!()
+    }
+
+    #[test]
+    fn test_uninstall_protocol_interface() {
+        todo!()
+    }
+
+    #[test]
+    fn test_uninstall_protocol_marker_not_init() {
+        todo!()
+    }
+
+    #[test]
+    fn test_uninstall_protocol_marker() {
+        todo!()
+    }
+
+    #[test]
+    fn test_reinstall_protocol_interface_not_init() {
+        todo!()
+    }
+
+    #[test]
+    fn test_reinstall_protocol_interface() {
+        todo!()
+    }
+
+    #[test]
+    fn test_register_protocol_notify_not_init() {
+        todo!()
+    }
+
+    #[test]
+    fn test_register_protocol_notify() {
+        todo!()
+    }
+
+    #[test]
+    fn test_locate_handle_not_init() {
+        todo!()
+    }
+
+    #[test]
+    fn test_locate_handle() {
+        todo!()
+    }
+
+    #[test]
+    fn test_handle_protocol_not_init() {
+        todo!()
+    }
+
+    #[test]
+    fn test_handle_protocol() {
+        todo!()
+    }
+
+    #[test]
+    fn test_locate_device_path_not_init() {
+        todo!()
+    }
+
+    #[test]
+    fn test_locate_device_path() {
+        todo!()
+    }
+
+    #[test]
+    fn test_open_protocol_not_init() {
+        todo!()
+    }
+
+    #[test]
+    fn test_open_protocol() {
+        todo!()
+    }
+
+    #[test]
+    fn test_close_protocol_not_init() {
+        todo!()
+    }
+
+    #[test]
+    fn test_close_protocol() {
+        todo!()
+    }
+
+    #[test]
+    fn test_open_protocol_information_not_init() {
+        todo!()
+    }
+
+    #[test]
+    fn test_open_protocol_information() {
+        todo!()
+    }
+
+    #[test]
+    fn test_connect_controller_not_init() {
+        todo!()
+    }
+
+    #[test]
+    fn test_connect_controller() {
+        todo!()
+    }
+
+    #[test]
+    fn test_disconnect_controller_not_init() {
+        todo!()
+    }
+
+    #[test]
+    fn test_disconnect_controller() {
+        todo!()
+    }
+
+    #[test]
+    fn test_protocol_per_handle_not_init() {
+        todo!()
+    }
+
+    #[test]
+    fn test_protocol_per_handle() {
+        todo!()
+    }
+
+    #[test]
+    fn test_locate_protocol_not_init() {
+        todo!()
+    }
+
+    #[test]
+    fn test_locate_protocol() {
+        todo!()
+    }
+
+    #[test]
+    fn test_locate_protocol_marker_not_init() {
+        todo!()
+    }
+
+    #[test]
+    fn test_locate_protocol_marker() {
+        todo!()
+    }
+
+    #[test]
     fn test_locate_protocol() {
         const DEVICE_PATH_PROTOCOL: protocol_handler::DevicePath = protocol_handler::DevicePath {};
         use r_efi::protocols::device_path;
@@ -2040,7 +2211,7 @@ mod test {
     }
 
     #[test]
-    fn test_locate_protocol_indicator_protocol() {
+    fn test_locate_protocol_marker_protocol() {
         const DEVICE_PATH_PROTOCOL: protocol_handler::DevicePath = protocol_handler::DevicePath {};
         let boot_services = boot_services!(locate_protocol = efi_locate_protocol);
 
