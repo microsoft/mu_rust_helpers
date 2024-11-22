@@ -8,6 +8,7 @@ use core::{
 };
 
 #[derive(Clone, Copy)]
+// Ptr metadata is a struct that hold everything to rebuild the original pointer from this metadata.
 pub struct PtrMetadata<'a, T> {
     pub ptr_value: usize,
     _container: PhantomData<&'a T>,
@@ -19,6 +20,7 @@ impl<'a, R: CPtr<'a, Type = T>, T> PtrMetadata<'a, R> {
     }
 }
 
+// Trait for type that can be used as pointer.
 pub unsafe trait CPtr<'a>: Sized {
     type Type: Sized;
 
@@ -33,6 +35,8 @@ pub unsafe trait CPtr<'a>: Sized {
         PtrMetadata { ptr_value: self.as_ptr() as usize, _container: PhantomData }
     }
 }
+
+// Trait for type that can be used as mutable pointer.
 pub unsafe trait CMutPtr<'a>: CPtr<'a> {
     fn as_mut_ptr(&mut self) -> *mut Self::Type {
         <Self as CPtr>::as_ptr(self) as *mut _
@@ -44,12 +48,14 @@ pub unsafe trait CMutPtr<'a>: CPtr<'a> {
     }
 }
 
+// Trait for type that can be used as pointer and that can not be null.
 pub unsafe trait CRef<'a>: CPtr<'a> {
     fn as_ref(&self) -> &Self::Type {
         unsafe { self.as_ptr().as_ref().unwrap() }
     }
 }
 
+// Trait for type that can be used as mutable pointer and that can not be null.
 pub unsafe trait CMutRef<'a>: CRef<'a> + CMutPtr<'a> {
     fn as_mut(&mut self) -> &mut Self::Type {
         unsafe { self.as_mut_ptr().as_mut().unwrap() }
