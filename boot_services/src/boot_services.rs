@@ -585,7 +585,7 @@ pub trait BootServices {
     fn protocols_per_handle<'a>(
         &'a self,
         handle: efi::Handle,
-    ) -> Result<BootServicesBox<'a, [efi::Guid], Self>, efi::Status>;
+    ) -> Result<BootServicesBox<'a, [&'static efi::Guid], Self>, efi::Status>;
 
     /// Returns an array of handles that support the requested protocol in a buffer allocated from pool.
     ///
@@ -1244,7 +1244,10 @@ impl BootServices for StandardBootServices<'_> {
         }
     }
 
-    fn protocols_per_handle(&self, handle: efi::Handle) -> Result<BootServicesBox<[efi::Guid], Self>, efi::Status> {
+    fn protocols_per_handle(
+        &self,
+        handle: efi::Handle,
+    ) -> Result<BootServicesBox<[&'static efi::Guid], Self>, efi::Status> {
         let mut protocol_buffer = ptr::null_mut();
         let mut protocol_buffer_count = 0;
         match efi_boot_services_fn!(self.efi_boot_services(), protocols_per_handle)(
@@ -1451,7 +1454,7 @@ impl BootServices for StandardBootServices<'_> {
 
 #[cfg(test)]
 mod test {
-    use efi::{protocols::device_path, Boolean, Char16};
+    use efi::{protocols::device_path, Boolean, Char16, OpenProtocolInformationEntry};
     use ffi_helper::CPtr;
 
     use super::*;
@@ -2454,7 +2457,10 @@ mod test {
 
     #[test]
     fn test_open_protocol_information() {
-        let boot_services = boot_services!();
+        let boot_services = boot_services!(
+            open_protocol_information = efi_open_protocol_information,
+            free_pool = efi_free_pool_use_box
+        );
 
         extern "efiapi" fn efi_open_protocol_information(
             handle: efi::Handle,
@@ -2467,12 +2473,25 @@ mod test {
             assert_ne!(ptr::null_mut(), entry_buffer);
             assert_ne!(ptr::null_mut(), entry_count);
 
-            todo!();
+            let buff = Box::new([efi::OpenProtocolInformationEntry {
+                agent_handle: ptr::null_mut(),
+                controller_handle: ptr::null_mut(),
+                attributes: 10,
+                open_count: 0,
+            }])
+            .into_raw_mut() as *mut OpenProtocolInformationEntry;
+
+            unsafe {
+                ptr::write(entry_buffer, buff);
+                ptr::write(entry_count, 1)
+            };
 
             efi::Status::SUCCESS
         }
 
         let info = boot_services.open_protocol_information(1 as usize as _, &TestProtocol).unwrap();
+        assert_eq!(1, info.len());
+        assert_eq!(10, info[0].attributes);
     }
 
     #[test]
@@ -2582,7 +2601,32 @@ mod test {
 
     #[test]
     fn test_protocol_per_handle() {
-        todo!()
+        let boot_services =
+            boot_services!(protocols_per_handle = efi_protocol_per_handle, free_pool = efi_free_pool_use_box);
+
+        extern "efiapi" fn efi_protocol_per_handle(
+            handle: efi::Handle,
+            protocol_buffer: *mut *mut *mut efi::Guid,
+            protocol_buffer_count: *mut usize,
+        ) -> efi::Status {
+            assert_eq!(1, handle as usize);
+            assert_ne!(ptr::null_mut(), protocol_buffer);
+            assert_ne!(ptr::null_mut(), protocol_buffer_count);
+
+            #[allow(unused_allocation)]
+            let buff = Box::new(ptr::addr_of!(TEST_PROTOCOL_GUID) as *mut efi::Guid).into_raw_mut();
+
+            unsafe {
+                ptr::write(protocol_buffer, buff);
+                ptr::write(protocol_buffer_count, 1);
+            }
+
+            efi::Status::SUCCESS
+        }
+
+        let protocols = boot_services.protocols_per_handle(1 as usize as _).unwrap();
+        assert_eq!(1, protocols.len());
+        assert_eq!(TEST_PROTOCOL_GUID, *protocols[0]);
     }
 
     #[test]
