@@ -25,7 +25,7 @@ pub unsafe trait StaticPtr: Sized + 'static {
 
     fn into_raw(self) -> *const Self::Pointee;
 
-    fn metadata(&self) -> StaticPtrMetadata<Self> {
+    fn metadata_old(&self) -> StaticPtrMetadata<Self> {
         StaticPtrMetadata { ptr_value: unsafe { mem::transmute_copy(self) }, _t: PhantomData }
     }
 
@@ -192,7 +192,7 @@ mod test {
     fn t() {
         let a = Box::new(9);
 
-        let m = StaticPtr::metadata(&a);
+        let m = StaticPtr::metadata_old(&a);
 
         println!("{:?}, {:?}", StaticPtr::into_raw(a) as usize, TypeId::of::<Box<i32>>());
 

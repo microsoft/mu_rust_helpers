@@ -41,7 +41,7 @@ impl<'a, T, B: BootServices> BootServicesBox<'a, T, B> {
 }
 
 impl<'a, T, B: BootServices> BootServicesBox<'a, [T], B> {
-    pub unsafe fn from_raw_parts(ptr: *mut T, len: usize, boot_services: &'a B) -> Self {
+    pub unsafe fn from_raw_parts_mut(ptr: *mut T, len: usize, boot_services: &'a B) -> Self {
         let ptr = slice::from_raw_parts_mut(ptr, len) as *mut [T];
         Self { boot_services, ptr }
     }
