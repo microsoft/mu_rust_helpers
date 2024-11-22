@@ -3,6 +3,7 @@ use core::{
     ffi::c_void,
     marker::PhantomData,
     mem::{self, ManuallyDrop},
+    ops::Deref,
     ptr,
 };
 
@@ -21,9 +22,7 @@ impl<'a, R: CPtr<'a, Type = T>, T> PtrMetadata<'a, R> {
 pub unsafe trait CPtr<'a>: Sized {
     type Type: Sized;
 
-    fn as_ptr(&self) -> *const Self::Type {
-        unsafe { mem::transmute_copy(self) }
-    }
+    fn as_ptr(&self) -> *const Self::Type;
 
     fn into_ptr(self) -> *const Self::Type {
         let this = ManuallyDrop::new(self);
@@ -47,13 +46,13 @@ pub unsafe trait CMutPtr<'a>: CPtr<'a> {
 
 pub unsafe trait CRef<'a>: CPtr<'a> {
     fn as_ref(&self) -> &Self::Type {
-        unsafe { mem::transmute_copy(self) }
+        unsafe { self.as_ptr().as_ref().unwrap() }
     }
 }
 
 pub unsafe trait CMutRef<'a>: CRef<'a> + CMutPtr<'a> {
     fn as_mut(&mut self) -> &mut Self::Type {
-        unsafe { mem::transmute_copy(self) }
+        unsafe { self.as_mut_ptr().as_mut().unwrap() }
     }
 }
 
@@ -61,6 +60,9 @@ pub unsafe trait CMutRef<'a>: CRef<'a> + CMutPtr<'a> {
 unsafe impl<'a, T> CPtr<'a> for &'a T {
     type Type = T;
 
+    fn as_ptr(&self) -> *const Self::Type {
+        *self as *const _
+    }
 }
 unsafe impl<'a, T> CRef<'a> for &'a T {}
 
@@ -68,6 +70,9 @@ unsafe impl<'a, T> CRef<'a> for &'a T {}
 unsafe impl<'a, T> CPtr<'a> for &'a mut T {
     type Type = T;
 
+    fn as_ptr(&self) -> *const Self::Type {
+        *self as *const _
+    }
 }
 unsafe impl<'a, T> CRef<'a> for &'a mut T {}
 unsafe impl<'a, T> CMutPtr<'a> for &'a mut T {}
@@ -77,6 +82,9 @@ unsafe impl<'a, T> CMutRef<'a> for &'a mut T {}
 unsafe impl<'a, T> CPtr<'a> for Box<T> {
     type Type = T;
 
+    fn as_ptr(&self) -> *const Self::Type {
+        AsRef::as_ref(self) as *const _
+    }
 }
 unsafe impl<'a, T> CRef<'a> for Box<T> {}
 unsafe impl<'a, T> CMutPtr<'a> for Box<T> {}
@@ -100,24 +108,30 @@ unsafe impl CMutPtr<'static> for () {
 // Option<T>
 unsafe impl<'a, R: CPtr<'a, Type = T>, T> CPtr<'a> for Option<R> {
     type Type = T;
+
+    fn as_ptr(&self) -> *const Self::Type {
+        self.as_ref().map_or(ptr::null(), |p| p.as_ptr())
+    }
 }
 unsafe impl<'a, R: CMutPtr<'a, Type = T>, T> CMutPtr<'a> for Option<R> {}
 
 // ManuallyDrop<T>
 unsafe impl<'a, R: CPtr<'a, Type = T>, T> CPtr<'a> for ManuallyDrop<R> {
     type Type = T;
+
+    fn as_ptr(&self) -> *const Self::Type {
+        <R as CPtr>::as_ptr(self.deref())
+    }
 }
 unsafe impl<'a, R: CMutPtr<'a, Type = T>, T> CMutPtr<'a> for ManuallyDrop<R> {}
 unsafe impl<'a, R: CRef<'a, Type = T>, T> CRef<'a> for ManuallyDrop<R> {}
 unsafe impl<'a, R: CMutRef<'a, Type = T>, T> CMutRef<'a> for ManuallyDrop<R> {}
-
 
 #[cfg(test)]
 mod test {
     use core::ptr;
 
     use super::*;
- 
 
     #[test]
     fn test_ref() {
@@ -128,12 +142,12 @@ mod test {
         assert_eq!(ptr, (&mut foo).as_mut_ptr());
 
         assert_eq!(ptr, (&foo).as_ref() as *const _);
-        assert_eq!(ptr,(&mut foo).as_mut() as *const _);
+        assert_eq!(ptr, (&mut foo).as_mut() as *const _);
 
-        assert_eq!(ptr,(&mut foo).into_ptr());
+        assert_eq!(ptr, (&mut foo).into_ptr());
         let mut foo = 10;
         let ptr = ptr::addr_of!(foo);
-        assert_eq!(ptr,(&mut foo).into_mut_ptr());
+        assert_eq!(ptr, (&mut foo).into_mut_ptr());
     }
 
     #[test]
@@ -191,6 +205,8 @@ mod test {
 
         let mdb = ManuallyDrop::new(unsafe { Box::from_raw(ptr as *mut i32) });
         assert_eq!(ptr, mdb.into_mut_ptr());
+
+        assert_eq!(ptr::null(), ManuallyDrop::new(()).as_ptr());
+        assert_eq!(ptr::null_mut(), ManuallyDrop::new(()).as_mut_ptr());
     }
-    
 }

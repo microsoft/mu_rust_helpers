@@ -10,7 +10,6 @@ pub mod boxed;
 pub mod event;
 pub mod ffi_helper;
 pub mod protocol_handler;
-pub mod static_ptr;
 pub mod tpl;
 
 #[cfg(any(test, feature = "mockall"))]
@@ -26,8 +25,7 @@ use core::{
     ptr::{self, NonNull},
     sync::atomic::{AtomicPtr, Ordering},
 };
-use ffi_helper::{CMutRef, PtrMetadata};
-use static_ptr::{StaticPtr, StaticPtrMut};
+use ffi_helper::{CMutPtr, CMutRef, CPtr, PtrMetadata};
 
 use r_efi::efi;
 
@@ -102,8 +100,7 @@ pub trait BootServices {
         notify_context: T,
     ) -> Result<efi::Event, efi::Status>
     where
-        T: StaticPtr + 'static,
-        <T as StaticPtr>::Pointee: Sized + 'static,
+        T: CPtr<'static> + 'static,
     {
         //SAFETY: ['StaticPtr`] generic is used to guaranteed that rust borowing and rules are meet.
         unsafe {
@@ -111,7 +108,7 @@ pub trait BootServices {
                 event_type,
                 notify_tpl,
                 mem::transmute(notify_function),
-                notify_context.into_raw() as *mut <T as StaticPtr>::Pointee,
+                notify_context.into_ptr() as *mut T::Type,
             )
         }
     }
@@ -148,8 +145,7 @@ pub trait BootServices {
         event_group: &'static efi::Guid,
     ) -> Result<efi::Event, efi::Status>
     where
-        T: StaticPtr + 'static,
-        <T as StaticPtr>::Pointee: Sized + 'static,
+        T: CPtr<'static> + 'static,
     {
         //SAFETY: [`StaticPtr`] generic is used to guaranteed that rust borowing and rules are meet.
         unsafe {
@@ -157,7 +153,7 @@ pub trait BootServices {
                 event_type,
                 notify_tpl.into(),
                 mem::transmute(notify_function),
-                notify_context.into_raw() as *mut <T as StaticPtr>::Pointee,
+                notify_context.into_ptr() as *mut <T as CPtr>::Type,
                 event_group,
             )
         }
@@ -786,12 +782,12 @@ pub trait BootServices {
     /// Adds, updates, or removes a configuration table entry from the EFI System Table.
     ///
     /// [UEFI Spec Documentation: 7.5.6. EFI_BOOT_SERVICES.InstallConfigurationTable()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-installconfigurationtable)
-    fn install_configuration_table<T: StaticPtrMut + 'static>(
+    fn install_configuration_table<T: CMutPtr<'static> + 'static>(
         &self,
         guid: &efi::Guid,
         table: T,
     ) -> Result<(), efi::Status> {
-        unsafe { self.install_configuration_table_unchecked(guid, table.into_raw_mut() as *mut c_void) }
+        unsafe { self.install_configuration_table_unchecked(guid, table.into_mut_ptr() as *mut c_void) }
     }
 
     /// Use [`BootServices::install_configuration_table`] when possible.
@@ -1560,7 +1556,7 @@ mod test {
     #[should_panic = "Boot services function create_event is not initialized."]
     fn test_create_event_not_init() {
         let boot_services = boot_services!();
-        let _ = boot_services.create_event(EventType::RUNTIME, Tpl::APPLICATION, None, &());
+        let _ = boot_services.create_event(EventType::RUNTIME, Tpl::APPLICATION, None, ());
     }
 
     #[test]
@@ -1615,13 +1611,13 @@ mod test {
             assert_eq!(efi::EVT_RUNTIME | efi::EVT_NOTIFY_SIGNAL, event_type);
             assert_eq!(efi::TPL_APPLICATION, notify_tpl);
             assert_eq!(None, notify_function);
-            assert_ne!(ptr::null_mut(), notify_context);
+            assert_eq!(ptr::null_mut(), notify_context);
             assert_ne!(ptr::null_mut(), event);
             efi::Status::SUCCESS
         }
 
         let status =
-            boot_services.create_event(EventType::RUNTIME | EventType::NOTIFY_SIGNAL, Tpl::APPLICATION, None, &());
+            boot_services.create_event(EventType::RUNTIME | EventType::NOTIFY_SIGNAL, Tpl::APPLICATION, None, ());
 
         assert!(matches!(status, Ok(_)));
     }
@@ -1631,7 +1627,7 @@ mod test {
     fn test_create_event_ex_not_init() {
         static GUID: efi::Guid = efi::Guid::from_fields(0, 0, 0, 0, 0, &[0; 6]);
         let boot_services = boot_services!();
-        let _ = boot_services.create_event_ex(EventType::RUNTIME, Tpl::APPLICATION, None, &(), &GUID);
+        let _ = boot_services.create_event_ex(EventType::RUNTIME, Tpl::APPLICATION, None, (), &GUID);
     }
 
     #[test]
@@ -1690,7 +1686,7 @@ mod test {
             assert_eq!(efi::EVT_RUNTIME | efi::EVT_NOTIFY_SIGNAL, event_type);
             assert_eq!(efi::TPL_APPLICATION, notify_tpl);
             assert_eq!(None, notify_function);
-            assert_ne!(ptr::null(), notify_context);
+            assert_eq!(ptr::null(), notify_context);
             assert_eq!(ptr::addr_of!(GUID), event_group);
             assert_ne!(ptr::null_mut(), event);
             efi::Status::SUCCESS
@@ -1700,7 +1696,7 @@ mod test {
             EventType::RUNTIME | EventType::NOTIFY_SIGNAL,
             Tpl::APPLICATION,
             None,
-            &(),
+            (),
             &GUID,
         );
 
@@ -2348,7 +2344,7 @@ mod test {
             assert_eq!(TEST_PROTOCOL_GUID, unsafe { ptr::read(protocol) });
             assert_ne!(ptr::null_mut(), interface);
             let b = Box::new(12);
-            unsafe { ptr::write(interface, b.into_raw_mut() as *mut _) };
+            unsafe { ptr::write(interface, b.into_mut_ptr() as *mut _) };
             efi::Status::SUCCESS
         }
 
@@ -2410,7 +2406,7 @@ mod test {
             assert_eq!(4, attributes);
 
             let b = Box::new(12);
-            unsafe { ptr::write(interface, b.into_raw_mut() as _) };
+            unsafe { ptr::write(interface, b.into_mut_ptr() as _) };
 
             efi::Status::SUCCESS
         }
@@ -2479,7 +2475,7 @@ mod test {
                 attributes: 10,
                 open_count: 0,
             }])
-            .into_raw_mut() as *mut OpenProtocolInformationEntry;
+            .into_mut_ptr() as *mut OpenProtocolInformationEntry;
 
             unsafe {
                 ptr::write(entry_buffer, buff);
@@ -2614,7 +2610,7 @@ mod test {
             assert_ne!(ptr::null_mut(), protocol_buffer_count);
 
             #[allow(unused_allocation)]
-            let buff = Box::new(ptr::addr_of!(TEST_PROTOCOL_GUID) as *mut efi::Guid).into_raw_mut();
+            let buff = Box::new(ptr::addr_of!(TEST_PROTOCOL_GUID) as *mut efi::Guid).into_mut_ptr();
 
             unsafe {
                 ptr::write(protocol_buffer, buff);
