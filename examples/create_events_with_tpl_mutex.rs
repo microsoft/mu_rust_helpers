@@ -1,7 +1,7 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
-use boot_services::ffi_helper::{CMutPtr, CPtr};
+use boot_services::c_ptr::CMutPtr;
 use core::{ffi::c_void, mem::MaybeUninit, ptr};
 
 use mu_rust_helpers::{
