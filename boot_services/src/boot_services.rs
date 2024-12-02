@@ -7,8 +7,8 @@ extern crate alloc;
 
 pub mod allocation;
 pub mod boxed;
-pub mod event;
 pub mod c_ptr;
+pub mod event;
 pub mod protocol_handler;
 pub mod tpl;
 
@@ -16,6 +16,7 @@ pub mod tpl;
 use mockall::automock;
 
 use alloc::vec::Vec;
+use c_ptr::{CMutPtr, CMutRef, CPtr, PtrMetadata};
 use core::{
     any::{Any, TypeId},
     ffi::c_void,
@@ -25,7 +26,6 @@ use core::{
     ptr::{self, NonNull},
     sync::atomic::{AtomicPtr, Ordering},
 };
-use c_ptr::{CMutPtr, CMutRef, CPtr, PtrMetadata};
 
 use r_efi::efi;
 
@@ -1430,8 +1430,8 @@ impl BootServices for StandardBootServices<'_> {
 
 #[cfg(test)]
 mod test {
-    use efi::{protocols::device_path, Boolean, Char16, OpenProtocolInformationEntry};
     use c_ptr::CPtr;
+    use efi::{protocols::device_path, Boolean, Char16, OpenProtocolInformationEntry};
 
     use super::*;
     use core::{mem::MaybeUninit, ops::Deref, slice, sync::atomic::AtomicUsize, u32, u64};
@@ -2451,7 +2451,9 @@ mod test {
             efi::Status::SUCCESS
         }
 
-        boot_services.open_protocol_marker(1 as usize as _, &TestProtocolMarker, 2 as usize as _, 3 as usize as _, 4).unwrap()
+        boot_services
+            .open_protocol_marker(1 as usize as _, &TestProtocolMarker, 2 as usize as _, 3 as usize as _, 4)
+            .unwrap()
     }
 
     #[test]
@@ -2470,7 +2472,9 @@ mod test {
             efi::Status::SUCCESS
         }
 
-        let _ = unsafe { boot_services.open_protocol(1 as usize as _, &TestProtocolMarker, 2 as usize as _, 3 as usize as _, 4) };
+        let _ = unsafe {
+            boot_services.open_protocol(1 as usize as _, &TestProtocolMarker, 2 as usize as _, 3 as usize as _, 4)
+        };
     }
 
     #[test]
