@@ -1,6 +1,7 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
+use boot_services::c_ptr::CMutPtr;
 use core::{ffi::c_void, mem::MaybeUninit, ptr};
 
 use mu_rust_helpers::{
@@ -43,20 +44,20 @@ fn main() {
     };
     BOOT_SERVICE.initialize(&efi_boot_services);
 
-    let ctx = Box::new(MyContext {
+    let mut ctx = Box::new(MyContext {
         _some_immutable_state: 0,
         _some_other_immutable_state: ptr::null_mut(),
         some_mutable_state: TplMutex::new(&BOOT_SERVICE, Tpl::CALLBACK, 0),
         _some_other_mutable_state: TplMutex::new(&BOOT_SERVICE, Tpl::CALLBACK, String::new()),
     });
 
-    let ctx = Box::leak::<'static>(ctx) as &MyContext;
+    let ctx_ref = unsafe { ctx.as_mut_ptr().as_mut::<'static>() }.unwrap();
 
     match BOOT_SERVICE.create_event(
         EventType::RUNTIME | EventType::NOTIFY_SIGNAL,
         Tpl::CALLBACK,
         Some(event_notify_callback_tpl_mutex),
-        ctx,
+        ctx_ref,
     ) {
         Ok(_event) => (),
         Err(_status) => (),
@@ -66,7 +67,7 @@ fn main() {
         EventType::RUNTIME | EventType::NOTIFY_SIGNAL,
         Tpl::CALLBACK,
         Some(event_notify_callback_tpl_mutex_2),
-        Some(ctx),
+        Some(ctx_ref),
     ) {
         Ok(_event) => (),
         Err(_status) => (),
@@ -76,8 +77,6 @@ fn main() {
         Ok(_event) => (),
         Err(_status) => (),
     };
-
-    drop(unsafe { Box::from_raw(ctx as *const _ as *mut MyContext) });
 }
 
 extern "efiapi" fn efi_create_event(

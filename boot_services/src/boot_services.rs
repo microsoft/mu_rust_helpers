@@ -7,15 +7,16 @@ extern crate alloc;
 
 pub mod allocation;
 pub mod boxed;
+pub mod c_ptr;
 pub mod event;
 pub mod protocol_handler;
-pub mod static_ptr;
 pub mod tpl;
 
 #[cfg(any(test, feature = "mockall"))]
 use mockall::automock;
 
 use alloc::vec::Vec;
+use c_ptr::{CMutPtr, CMutRef, CPtr, PtrMetadata};
 use core::{
     any::{Any, TypeId},
     ffi::c_void,
@@ -25,7 +26,6 @@ use core::{
     ptr::{self, NonNull},
     sync::atomic::{AtomicPtr, Ordering},
 };
-use static_ptr::{StaticPtr, StaticPtrMut};
 
 use r_efi::efi;
 
@@ -100,8 +100,7 @@ pub trait BootServices {
         notify_context: T,
     ) -> Result<efi::Event, efi::Status>
     where
-        T: StaticPtr + 'static,
-        <T as StaticPtr>::Pointee: Sized + 'static,
+        T: CPtr<'static> + 'static,
     {
         //SAFETY: ['StaticPtr`] generic is used to guaranteed that rust borowing and rules are meet.
         unsafe {
@@ -109,12 +108,12 @@ pub trait BootServices {
                 event_type,
                 notify_tpl,
                 mem::transmute(notify_function),
-                notify_context.into_raw() as *mut <T as StaticPtr>::Pointee,
+                notify_context.into_ptr() as *mut T::Type,
             )
         }
     }
 
-    /// Prefer normal [`BootServices::create_event`] when possible.
+    /// Use [`BootServices::create_event`] when possible.
     ///
     /// # Safety
     ///
@@ -146,8 +145,7 @@ pub trait BootServices {
         event_group: &'static efi::Guid,
     ) -> Result<efi::Event, efi::Status>
     where
-        T: StaticPtr + 'static,
-        <T as StaticPtr>::Pointee: Sized + 'static,
+        T: CPtr<'static> + 'static,
     {
         //SAFETY: [`StaticPtr`] generic is used to guaranteed that rust borowing and rules are meet.
         unsafe {
@@ -155,13 +153,13 @@ pub trait BootServices {
                 event_type,
                 notify_tpl.into(),
                 mem::transmute(notify_function),
-                notify_context.into_raw() as *mut <T as StaticPtr>::Pointee,
+                notify_context.into_ptr() as *mut <T as CPtr>::Type,
                 event_group,
             )
         }
     }
 
-    /// Prefer normal [`BootServices::create_event_ex`] when possible.
+    /// Use [`BootServices::create_event_ex`] when possible.
     ///
     /// # Safety
     ///
@@ -259,21 +257,46 @@ pub trait BootServices {
     /// If the handle does not exist, it is created and added to the list of handles in the system.
     ///
     /// [UEFI Spec Documentation: 7.3.2. EFI_BOOT_SERVICES.InstallProtocolInterface()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-installprotocolinterface)
-    fn install_protocol_interface<P: Protocol<Interface = I> + 'static, I: Any + 'static>(
+    fn install_protocol_interface<P, R, I>(
         &self,
         handle: Option<efi::Handle>,
         protocol: &P,
-        interface: &'static mut I,
-    ) -> Result<efi::Handle, efi::Status> {
-        let interface_ptr = match (interface as &dyn Any).downcast_ref::<()>() {
-            Some(()) => ptr::null_mut(),
-            None => interface as *mut _ as *mut c_void,
+        interface: R,
+    ) -> Result<(efi::Handle, PtrMetadata<'static, R>), efi::Status>
+    where
+        P: Protocol<Interface = I> + 'static,
+        R: CMutRef<'static, Type = I> + 'static,
+        I: 'static,
+    {
+        assert_ne!(
+            TypeId::of::<()>(),
+            TypeId::of::<I>(),
+            "Marker interface are not supported by install_protocol_interface, use install_protocol_marker instead."
+        );
+
+        let key = interface.metadata();
+        let handle = unsafe {
+            self.install_protocol_interface_unchecked(
+                handle,
+                protocol.protocol_guid(),
+                interface.into_mut_ptr() as *mut c_void,
+            )?
         };
-        //SAFETY: The generic Protocol ensure that the interface is the right type for the specified protocol.
-        unsafe { self.install_protocol_interface_unchecked(handle, protocol.protocol_guid(), interface_ptr) }
+        Ok((handle, key))
     }
 
-    /// Prefer normal [`BootServices::install_protocol_interface`] when possible.
+    /// Installs a protocol marker (null) interface on a device handle.
+    /// If the handle does not exist, it is created and added to the list of handles in the system.
+    ///
+    /// [UEFI Spec Documentation: 7.3.2. EFI_BOOT_SERVICES.InstallProtocolInterface()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-installprotocolinterface)
+    fn install_protocol_marker<P>(&self, handle: Option<efi::Handle>, protocol: &P) -> Result<efi::Handle, efi::Status>
+    where
+        P: Protocol<Interface = ()> + 'static,
+    {
+        unsafe { self.install_protocol_interface_unchecked(handle, protocol.protocol_guid(), ptr::null_mut()) }
+    }
+
+    /// Use [`BootServices::install_protocol_interface`] when possible.
     ///
     /// # Safety
     ///
@@ -289,24 +312,38 @@ pub trait BootServices {
     /// Removes a protocol interface from a device handle.
     ///
     /// [UEFI Spec Documentation: 7.3.3. EFI_BOOT_SERVICES.UninstallProtocolInterface()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-uninstallprotocolinterface)
-    fn uninstall_protocol_interface<P: Protocol<Interface = I> + 'static, I: Any + 'static>(
+    fn uninstall_protocol_interface<P, R, I>(
         &self,
         handle: efi::Handle,
         protocol: &P,
-        interface: &'static mut I,
-    ) -> Result<(), efi::Status> {
-        let interface_ptr = match (interface as &dyn Any).downcast_ref::<()>() {
-            Some(()) => ptr::null_mut(),
-            None => interface as *mut _ as *mut c_void,
-        };
-        //SAFETY: The generic Protocol ensure that the interface is the right type for the specified protocol.
-        unsafe { self.uninstall_protocol_interface_unchecked(handle, protocol.protocol_guid(), interface_ptr) }
+        key: PtrMetadata<'static, R>,
+    ) -> Result<R, efi::Status>
+    where
+        P: Protocol<Interface = I> + 'static,
+        R: CMutRef<'static, Type = I> + 'static,
+        I: 'static,
+    {
+        unsafe {
+            self.uninstall_protocol_interface_unchecked(handle, protocol.protocol_guid(), key.ptr_value as *mut c_void)
+        }?;
+        Ok(unsafe { key.into_original_ptr() })
     }
 
-    /// Prefer normal [`BootServices::uninstall_protocol_interface`] when possible.
+    /// Removes a protocol interface marker (null) from a device handle.
+    ///
+    /// [UEFI Spec Documentation: 7.3.3. EFI_BOOT_SERVICES.UninstallProtocolInterface()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-uninstallprotocolinterface)
+    fn uninstall_protocol_marker<P>(&self, handle: efi::Handle, protocol: &P) -> Result<(), efi::Status>
+    where
+        P: Protocol<Interface = ()> + 'static,
+    {
+        unsafe { self.uninstall_protocol_interface_unchecked(handle, protocol.protocol_guid(), ptr::null_mut()) }
+    }
+
+    /// Use [`BootServices::uninstall_protocol_interface`] when possible.
     ///
     /// # Safety
     ///
+    /// interface must be a valid pointer and be of the type expected by to protocol.
     unsafe fn uninstall_protocol_interface_unchecked(
         &self,
         handle: efi::Handle,
@@ -317,34 +354,37 @@ pub trait BootServices {
     /// Reinstalls a protocol interface on a device handle.
     ///
     /// [UEFI Spec Documentation: 7.3.4. EFI_BOOT_SERVICES.ReinstallProtocolInterface()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-reinstallprotocolinterface)
-    fn reinstall_protocol_interface<P: Protocol<Interface = I> + 'static, I: 'static>(
+    fn reinstall_protocol_interface<P, O, N, I>(
         &self,
         handle: efi::Handle,
         protocol: &P,
-        old_protocol_interface: &'static mut I,
-        new_protocol_interface: &'static mut I,
-    ) -> Result<(), efi::Status> {
-        let old_protocol_interface_ptr;
-        let new_protocol_interface_ptr;
-        if TypeId::of::<I>() == TypeId::of::<()>() {
-            old_protocol_interface_ptr = ptr::null_mut();
-            new_protocol_interface_ptr = ptr::null_mut();
-        } else {
-            old_protocol_interface_ptr = old_protocol_interface as *mut _ as *mut c_void;
-            new_protocol_interface_ptr = new_protocol_interface as *mut _ as *mut c_void;
-        }
-        //SAFETY: The generic Protocol ensure that the interfaces is the right type for the specified protocol.
+        old_protocol_interface_key: PtrMetadata<'static, O>,
+        new_protocol_interface: N,
+    ) -> Result<(PtrMetadata<'static, N>, O), efi::Status>
+    where
+        P: Protocol<Interface = I> + 'static,
+        O: CMutRef<'static, Type = I> + 'static,
+        N: CMutRef<'static, Type = I> + 'static,
+        I: 'static,
+    {
+        assert_ne!(
+            TypeId::of::<()>(),
+            TypeId::of::<I>(),
+            "Marker interface are not supported with reinstall_protocol_interface function."
+        );
+        let new_key = new_protocol_interface.metadata();
         unsafe {
             self.reinstall_protocol_interface_unchecked(
                 handle,
                 protocol.protocol_guid(),
-                old_protocol_interface_ptr,
-                new_protocol_interface_ptr,
-            )
+                old_protocol_interface_key.ptr_value as *mut _,
+                new_protocol_interface.into_mut_ptr() as *mut _,
+            )?;
         }
+        Ok((new_key, unsafe { old_protocol_interface_key.into_original_ptr() }))
     }
 
-    /// Prefer normal [`BootServices::reinstall_protocol_interface`] when possible.
+    /// Use [`BootServices::reinstall_protocol_interface`] when possible.
     ///
     /// # Safety
     /// When calling this method, you have to make sure that if *new_protocol_interface* pointer is non-null, it is adhereing to
@@ -374,24 +414,43 @@ pub trait BootServices {
         search_type: HandleSearchType,
     ) -> Result<BootServicesBox<'a, [efi::Handle], Self>, efi::Status>;
 
-    /// Queries a handle to determine if it supports a specified protocol.
+    /// Queries a handle to determine if it supports a specified protocol and return a mutable reference to the interface.
     ///
     /// [UEFI Spec Documentation: 7.3.7. EFI_BOOT_SERVICES.HandleProtocol()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-handleprotocol)
-    fn handle_protocol<P: Protocol<Interface = I> + 'static, I: 'static>(
+    ///
+    /// # Safety
+    /// Make sure to not create multiple mutable reference of interface.
+    unsafe fn handle_protocol<P: Protocol<Interface = I> + 'static, I: 'static>(
         &self,
         handle: efi::Handle,
         protocol: &P,
     ) -> Result<&'static mut I, efi::Status> {
+        assert_ne!(
+            TypeId::of::<()>(),
+            TypeId::of::<I>(),
+            "Marker interface are not supported with handle_protocol function, use handle_protocol_marker instead."
+        );
         //SAFETY: The generic Protocol ensure that the interfaces is the right type for the specified protocol.
         unsafe {
             self.handle_protocol_unchecked(handle, protocol.protocol_guid()).map(|i| (i as *mut I).as_mut().unwrap())
         }
     }
 
-    /// Prefer normal [`BootServices::handle_protocol`] when possible.
+    /// Queries a handle to determine if it supports a specified protocol marker.
     ///
-    /// # Safety
-    ///
+    /// [UEFI Spec Documentation: 7.3.7. EFI_BOOT_SERVICES.HandleProtocol()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-handleprotocol)
+    fn handle_protocol_marker<P: Protocol<Interface = ()> + 'static>(
+        &self,
+        handle: efi::Handle,
+        protocol: &P,
+    ) -> Result<(), efi::Status> {
+        //SAFETY: The generic Protocol ensure that the interfaces is the right type for the specified protocol.
+        let interface_marker = unsafe { self.handle_protocol_unchecked(handle, protocol.protocol_guid()) }?;
+        debug_assert!(interface_marker.is_null(), "Interface marker should be null.");
+        Ok(())
+    }
+
+    /// Use [`BootServices::handle_protocol`] when possible.
     unsafe fn handle_protocol_unchecked(
         &self,
         handle: efi::Handle,
@@ -400,9 +459,11 @@ pub trait BootServices {
 
     /// Locates the handle to a device on the device path that supports the specified protocol.
     ///
+    /// [UEFI Spec Documentation: 7.3.8. EFI_BOOT_SERVICES.LocateDevicePath()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-locatedevicepath)
+    ///
     /// # Safety
     ///
-    /// [UEFI Spec Documentation: 7.3.8. EFI_BOOT_SERVICES.LocateDevicePath()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-locatedevicepath)
+    /// device path mut be valid pointers.
     unsafe fn locate_device_path(
         &self,
         protocol: &efi::Guid,
@@ -413,22 +474,50 @@ pub trait BootServices {
     /// If the protocol is supported by the handle, it opens the protocol on behalf of the calling agent.
     ///
     /// [UEFI Spec Documentation: 7.3.9. EFI_BOOT_SERVICES.OpenProtocol()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-openprotocol)
-    fn open_protocol<P: Protocol<Interface = I> + 'static, I: 'static>(
+    ///
+    /// # Safety
+    ///
+    /// Do not create more than one mutable reference to the interface.
+    unsafe fn open_protocol<P: Protocol<Interface = I> + 'static, I: 'static>(
         &self,
         handle: efi::Handle,
         protocol: &P,
         agent_handle: efi::Handle,
         controller_handle: efi::Handle,
         attribute: u32,
-    ) -> Result<Option<&'static mut I>, efi::Status> {
+    ) -> Result<&'static mut I, efi::Status> {
+        assert_ne!(
+            TypeId::of::<()>(),
+            TypeId::of::<I>(),
+            "Marker interface are not supported with open_protocol function, use open_protocol_marker instead."
+        );
         //SAFETY: The generic Protocol ensure that the interfaces is the right type for the specified protocol.
         unsafe {
             self.open_protocol_unchecked(handle, protocol, agent_handle, controller_handle, attribute)
-                .map(|i| (i as *mut I).as_mut())
+                .map(|i| (i as *mut I).as_mut().unwrap())
         }
     }
 
-    /// Prefer normal [`BootServices::open_protocol`] when possible.
+    /// Queries a handle to determine if it supports a specified protocol marker.
+    /// If the protocol is supported by the handle, it opens the protocol on behalf of the calling agent.
+    ///
+    /// [UEFI Spec Documentation: 7.3.9. EFI_BOOT_SERVICES.OpenProtocol()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-openprotocol)
+    fn open_protocol_marker<P: Protocol<Interface = ()> + 'static>(
+        &self,
+        handle: efi::Handle,
+        protocol: &P,
+        agent_handle: efi::Handle,
+        controller_handle: efi::Handle,
+        attribute: u32,
+    ) -> Result<(), efi::Status> {
+        //SAFETY: The generic Protocol ensure that the interfaces is the right type for the specified protocol.
+        let interface_marker =
+            unsafe { self.open_protocol_unchecked(handle, protocol, agent_handle, controller_handle, attribute)? };
+        assert!(interface_marker.is_null());
+        Ok(())
+    }
+
+    /// Use [`BootServices::open_protocol`] when possible.
     ///
     /// # Safety
     ///
@@ -472,7 +561,7 @@ pub trait BootServices {
     unsafe fn connect_controller(
         &self,
         controller_handle: efi::Handle,
-        driver_image_handle: Vec<efi::Handle>,
+        driver_image_handles: Vec<efi::Handle>,
         remaining_device_path: *mut efi::protocols::device_path::Protocol,
         recursive: bool,
     ) -> Result<(), efi::Status>;
@@ -493,7 +582,7 @@ pub trait BootServices {
     fn protocols_per_handle<'a>(
         &'a self,
         handle: efi::Handle,
-    ) -> Result<BootServicesBox<'a, [efi::Guid], Self>, efi::Status>;
+    ) -> Result<BootServicesBox<'a, [&'static efi::Guid], Self>, efi::Status>;
 
     /// Returns an array of handles that support the requested protocol in a buffer allocated from pool.
     ///
@@ -506,22 +595,54 @@ pub trait BootServices {
     /// Returns the first protocol instance that matches the given protocol.
     ///
     /// [UEFI Spec Documentation: 7.3.16. EFI_BOOT_SERVICES.LocateProtocol()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-locateprotocol)
-    fn locate_protocol<P: Protocol<Interface = I> + 'static, I: 'static>(
+    ///
+    /// # Safety
+    ///
+    /// Make sure to not create multiple mutable reference when using this api.
+    unsafe fn locate_protocol<P, I>(
         &self,
         protocol: &P,
         registration: Option<Registration>,
-    ) -> Result<Option<&'static mut I>, efi::Status> {
+    ) -> Result<&'static mut I, efi::Status>
+    where
+        P: Protocol<Interface = I> + 'static,
+        I: Any + 'static,
+    {
+        assert_ne!(
+            TypeId::of::<()>(),
+            TypeId::of::<I>(),
+            "Marker interface are not supported by locate_protocol, use locate_protocol_marker instead."
+        );
+
         //SAFETY: The generic Protocol ensure that the interfaces is the right type for the specified protocol.
-        unsafe {
+        let interface_ptr = unsafe {
             self.locate_protocol_unchecked(
                 protocol.protocol_guid(),
                 registration.map_or(ptr::null_mut(), |r| r.as_ptr()),
-            )
-            .map(|ptr| if ptr.is_null() { None } else { Some((ptr as *mut I).as_mut().unwrap()) })
-        }
+            )? as *mut I
+        };
+        Ok(interface_ptr.as_mut().unwrap())
     }
 
-    /// Prefer normal [`BootServices::locate_protocol`] when possible.
+    /// Returns the first protocol instance that matches the given marker protocol.
+    ///
+    /// [UEFI Spec Documentation: 7.3.16. EFI_BOOT_SERVICES.LocateProtocol()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-locateprotocol)
+    fn locate_protocol_marker<P>(&self, protocol: &P, registration: Option<Registration>) -> Result<(), efi::Status>
+    where
+        P: Protocol<Interface = ()> + 'static,
+    {
+        //SAFETY: The generic Protocol ensure that the interfaces is the right type for the specified protocol.
+        let interface_ptr = unsafe {
+            self.locate_protocol_unchecked(
+                protocol.protocol_guid(),
+                registration.map_or(ptr::null_mut(), |r| r.as_ptr()),
+            )?
+        };
+        assert_eq!(ptr::null_mut(), interface_ptr);
+        Ok(())
+    }
+
+    /// Use [`BootServices::locate_protocol`] when possible.
     ///
     /// # Safety
     ///
@@ -641,12 +762,12 @@ pub trait BootServices {
     /// Adds, updates, or removes a configuration table entry from the EFI System Table.
     ///
     /// [UEFI Spec Documentation: 7.5.6. EFI_BOOT_SERVICES.InstallConfigurationTable()](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html#efi-boot-services-installconfigurationtable)
-    fn install_configuration_table<T: StaticPtrMut + 'static>(
+    fn install_configuration_table<T: CMutPtr<'static> + 'static>(
         &self,
         guid: &efi::Guid,
         table: T,
     ) -> Result<(), efi::Status> {
-        unsafe { self.install_configuration_table_unchecked(guid, table.into_raw_mut() as *mut c_void) }
+        unsafe { self.install_configuration_table_unchecked(guid, table.into_mut_ptr() as *mut c_void) }
     }
 
     /// Use [`BootServices::install_configuration_table`] when possible.
@@ -687,13 +808,8 @@ impl BootServices for StandardBootServices<'_> {
         notify_function: Option<EventNotifyCallback<*mut T>>,
         notify_context: *mut T,
     ) -> Result<efi::Event, efi::Status> {
-        let create_event = self.efi_boot_services().create_event;
-        if create_event as usize == 0 {
-            panic!("function not initialize.")
-        }
-
         let mut event = MaybeUninit::zeroed();
-        let status = create_event(
+        let status = efi_boot_services_fn!(self.efi_boot_services(), create_event)(
             event_type.into(),
             notify_tpl.into(),
             mem::transmute(notify_function),
@@ -715,13 +831,8 @@ impl BootServices for StandardBootServices<'_> {
         notify_context: *mut T,
         event_group: &'static efi::Guid,
     ) -> Result<efi::Event, efi::Status> {
-        let create_event_ex = self.efi_boot_services().create_event_ex;
-        if create_event_ex as usize == 0 {
-            panic!("function not initialize.")
-        }
-
         let mut event = MaybeUninit::zeroed();
-        let status = create_event_ex(
+        let status = efi_boot_services_fn!(self.efi_boot_services(), create_event_ex)(
             event_type.into(),
             notify_tpl.into(),
             mem::transmute(notify_function),
@@ -737,34 +848,26 @@ impl BootServices for StandardBootServices<'_> {
     }
 
     fn close_event(&self, event: efi::Event) -> Result<(), efi::Status> {
-        let close_event = self.efi_boot_services().close_event;
-        if close_event as usize == 0 {
-            panic!("function not initialize.")
-        }
-        match close_event(event) {
+        match efi_boot_services_fn!(self.efi_boot_services(), close_event)(event) {
             s if s.is_error() => Err(s),
             _ => Ok(()),
         }
     }
 
     fn signal_event(&self, event: efi::Event) -> Result<(), efi::Status> {
-        let signal_event = self.efi_boot_services().signal_event;
-        if signal_event as usize == 0 {
-            panic!("function not initialize.")
-        }
-        match signal_event(event) {
+        match efi_boot_services_fn!(self.efi_boot_services(), signal_event)(event) {
             s if s.is_error() => Err(s),
             _ => Ok(()),
         }
     }
 
     fn wait_for_event(&self, events: &mut [efi::Event]) -> Result<usize, efi::Status> {
-        let wait_for_event = self.efi_boot_services().wait_for_event;
-        if wait_for_event as usize == 0 {
-            panic!("function not initialize.")
-        }
         let mut index = MaybeUninit::zeroed();
-        let status = wait_for_event(events.len(), events.as_mut_ptr(), index.as_mut_ptr());
+        let status = efi_boot_services_fn!(self.efi_boot_services(), wait_for_event)(
+            events.len(),
+            events.as_mut_ptr(),
+            index.as_mut_ptr(),
+        );
         if status.is_error() {
             Err(status)
         } else {
@@ -773,41 +876,25 @@ impl BootServices for StandardBootServices<'_> {
     }
 
     fn check_event(&self, event: efi::Event) -> Result<(), efi::Status> {
-        let check_event = self.efi_boot_services().check_event;
-        if check_event as usize == 0 {
-            panic!("function not initialize.")
-        }
-        match check_event(event) {
+        match efi_boot_services_fn!(self.efi_boot_services(), check_event)(event) {
             s if s.is_error() => Err(s),
             _ => Ok(()),
         }
     }
 
     fn set_timer(&self, event: efi::Event, timer_type: EventTimerType, trigger_time: u64) -> Result<(), efi::Status> {
-        let set_timer = self.efi_boot_services().set_timer;
-        if set_timer as usize == 0 {
-            panic!("function not initialize.")
-        }
-        match set_timer(event, timer_type.into(), trigger_time) {
+        match efi_boot_services_fn!(self.efi_boot_services(), set_timer)(event, timer_type.into(), trigger_time) {
             s if s.is_error() => Err(s),
             _ => Ok(()),
         }
     }
 
     fn raise_tpl(&self, new_tpl: Tpl) -> Tpl {
-        let raise_tpl = self.efi_boot_services().raise_tpl;
-        if raise_tpl as usize == 0 {
-            panic!("function not initialize.")
-        }
-        raise_tpl(new_tpl.into()).into()
+        efi_boot_services_fn!(self.efi_boot_services(), raise_tpl)(new_tpl.into()).into()
     }
 
     fn restore_tpl(&self, old_tpl: Tpl) {
-        let restore_tpl = self.efi_boot_services().restore_tpl;
-        if restore_tpl as usize == 0 {
-            panic!("function not initialize.")
-        }
-        restore_tpl(old_tpl.into())
+        efi_boot_services_fn!(self.efi_boot_services(), restore_tpl)(old_tpl.into())
     }
 
     fn allocate_pages(
@@ -816,17 +903,12 @@ impl BootServices for StandardBootServices<'_> {
         memory_type: MemoryType,
         nb_pages: usize,
     ) -> Result<usize, efi::Status> {
-        let allocate_pages = self.efi_boot_services().allocate_pages;
-        if allocate_pages as usize == 0 {
-            panic!("function not initialize.")
-        }
-
         let mut memory_address = match alloc_type {
             AllocType::Address(address) => address,
             AllocType::MaxAddress(address) => address,
             _ => 0,
         };
-        match allocate_pages(
+        match efi_boot_services_fn!(self.efi_boot_services(), allocate_pages)(
             alloc_type.into(),
             memory_type.into(),
             nb_pages,
@@ -838,21 +920,14 @@ impl BootServices for StandardBootServices<'_> {
     }
 
     fn free_pages(&self, address: usize, nb_pages: usize) -> Result<(), efi::Status> {
-        let free_pages = self.efi_boot_services().free_pages;
-        if free_pages as usize == 0 {
-            panic!("function not initialize.")
-        }
-        match free_pages(address as u64, nb_pages) {
+        match efi_boot_services_fn!(self.efi_boot_services(), free_pages)(address as u64, nb_pages) {
             s if s.is_error() => Err(s),
             _ => Ok(()),
         }
     }
 
     fn get_memory_map<'a>(&'a self) -> Result<MemoryMap<'a, Self>, (efi::Status, usize)> {
-        let get_memory_map = self.efi_boot_services().get_memory_map;
-        if get_memory_map as usize == 0 {
-            panic!("function not initialize.")
-        }
+        let get_memory_map = efi_boot_services_fn!(self.efi_boot_services(), get_memory_map);
 
         let mut memory_map_size = 0;
         let mut map_key = 0;
@@ -884,30 +959,26 @@ impl BootServices for StandardBootServices<'_> {
             _ => (),
         }
         Ok(MemoryMap {
-            descriptors: unsafe { BootServicesBox::from_raw_parts(buffer as *mut _, descriptor_size, self) },
+            descriptors: unsafe { BootServicesBox::from_raw_parts_mut(buffer as *mut _, descriptor_size, self) },
             map_key,
             descriptor_version,
         })
     }
 
     fn allocate_pool(&self, memory_type: MemoryType, size: usize) -> Result<*mut u8, efi::Status> {
-        let allocate_pool = self.efi_boot_services().allocate_pool;
-        if allocate_pool as usize == 0 {
-            panic!("function not initialize.")
-        }
         let mut buffer = ptr::null_mut();
-        match allocate_pool(memory_type.into(), size, ptr::addr_of_mut!(buffer)) {
+        match efi_boot_services_fn!(self.efi_boot_services(), allocate_pool)(
+            memory_type.into(),
+            size,
+            ptr::addr_of_mut!(buffer),
+        ) {
             s if s.is_error() => return Err(s),
             _ => Ok(buffer as *mut u8),
         }
     }
 
     fn free_pool(&self, buffer: *mut u8) -> Result<(), efi::Status> {
-        let free_pool = self.efi_boot_services().free_pool;
-        if free_pool as usize == 0 {
-            panic!("function not initialize.")
-        }
-        match free_pool(buffer as *mut c_void) {
+        match efi_boot_services_fn!(self.efi_boot_services(), free_pool)(buffer as *mut c_void) {
             s if s.is_error() => return Err(s),
             _ => Ok(()),
         }
@@ -919,13 +990,8 @@ impl BootServices for StandardBootServices<'_> {
         protocol: &'static efi::Guid,
         interface: *mut c_void,
     ) -> Result<efi::Handle, efi::Status> {
-        let install_protocol_interface = self.efi_boot_services().install_protocol_interface;
-        if install_protocol_interface as usize == 0 {
-            panic!("function not initialize.")
-        }
-
         let mut handle = handle.unwrap_or(ptr::null_mut());
-        match install_protocol_interface(
+        match efi_boot_services_fn!(self.efi_boot_services(), install_protocol_interface)(
             ptr::addr_of_mut!(handle),
             protocol as *const _ as *mut _,
             efi::NATIVE_INTERFACE,
@@ -942,11 +1008,11 @@ impl BootServices for StandardBootServices<'_> {
         protocol: &'static efi::Guid,
         interface: *mut c_void,
     ) -> Result<(), efi::Status> {
-        let uninstall_protocol_interface = self.efi_boot_services().uninstall_protocol_interface;
-        if uninstall_protocol_interface as usize == 0 {
-            panic!("function not initialize.")
-        }
-        match uninstall_protocol_interface(handle, protocol as *const _ as *mut _, interface) {
+        match efi_boot_services_fn!(self.efi_boot_services(), uninstall_protocol_interface)(
+            handle,
+            protocol as *const _ as *mut _,
+            interface,
+        ) {
             s if s.is_error() => Err(s),
             _ => Ok(()),
         }
@@ -959,11 +1025,7 @@ impl BootServices for StandardBootServices<'_> {
         old_protocol_interface: *mut c_void,
         new_protocol_interface: *mut c_void,
     ) -> Result<(), efi::Status> {
-        let reinstall_protocol_interface = self.efi_boot_services().reinstall_protocol_interface;
-        if reinstall_protocol_interface as usize == 0 {
-            panic!("function not initialize.")
-        }
-        match reinstall_protocol_interface(
+        match efi_boot_services_fn!(self.efi_boot_services(), reinstall_protocol_interface)(
             handle,
             protocol as *const _ as *mut _,
             old_protocol_interface,
@@ -975,12 +1037,12 @@ impl BootServices for StandardBootServices<'_> {
     }
 
     fn register_protocol_notify(&self, protocol: &efi::Guid, event: efi::Event) -> Result<Registration, efi::Status> {
-        let register_protocol_notify = self.efi_boot_services().register_protocol_notify;
-        if register_protocol_notify as usize == 0 {
-            panic!("function not initialize.")
-        }
         let mut registration = MaybeUninit::uninit();
-        match register_protocol_notify(protocol as *const _ as *mut _, event, registration.as_mut_ptr() as *mut _) {
+        match efi_boot_services_fn!(self.efi_boot_services(), register_protocol_notify)(
+            protocol as *const _ as *mut _,
+            event,
+            registration.as_mut_ptr() as *mut _,
+        ) {
             s if s.is_error() => Err(s),
             _ => Ok(unsafe { registration.assume_init() }),
         }
@@ -990,10 +1052,8 @@ impl BootServices for StandardBootServices<'_> {
         &self,
         search_type: HandleSearchType,
     ) -> Result<BootServicesBox<[efi::Handle], Self>, efi::Status> {
-        let locate_handle = self.efi_boot_services().locate_handle;
-        if locate_handle as usize == 0 {
-            panic!("function not initialize.")
-        }
+        let locate_handle = efi_boot_services_fn!(self.efi_boot_services(), locate_handle);
+
         let protocol = match search_type {
             HandleSearchType::ByProtocol(p) => p as *const _ as *mut _,
             _ => ptr::null_mut(),
@@ -1018,7 +1078,11 @@ impl BootServices for StandardBootServices<'_> {
         ) {
             s if s.is_error() => Err(s),
             _ => Ok(unsafe {
-                BootServicesBox::from_raw_parts(buffer as *mut _, buffer_size / mem::size_of::<efi::Handle>(), &self)
+                BootServicesBox::from_raw_parts_mut(
+                    buffer as *mut _,
+                    buffer_size / mem::size_of::<efi::Handle>(),
+                    &self,
+                )
             }),
         }
     }
@@ -1028,12 +1092,12 @@ impl BootServices for StandardBootServices<'_> {
         handle: efi::Handle,
         protocol: &efi::Guid,
     ) -> Result<*mut c_void, efi::Status> {
-        let handle_protocol = self.efi_boot_services().handle_protocol;
-        if handle_protocol as usize == 0 {
-            panic!("function not initialize.")
-        }
         let mut interface = ptr::null_mut();
-        match handle_protocol(handle, protocol as *const _ as *mut _, ptr::addr_of_mut!(interface)) {
+        match efi_boot_services_fn!(self.efi_boot_services(), handle_protocol)(
+            handle,
+            protocol as *const _ as *mut _,
+            ptr::addr_of_mut!(interface),
+        ) {
             s if s.is_error() => Err(s),
             _ => Ok(interface),
         }
@@ -1044,12 +1108,12 @@ impl BootServices for StandardBootServices<'_> {
         protocol: &efi::Guid,
         device_path: *mut *mut efi::protocols::device_path::Protocol,
     ) -> Result<efi::Handle, efi::Status> {
-        let locate_device_path = self.efi_boot_services().locate_device_path;
-        if locate_device_path as usize == 0 {
-            panic!("function not initialize.")
-        }
         let mut device = ptr::null_mut();
-        match locate_device_path(protocol as *const _ as *mut _, device_path, ptr::addr_of_mut!(device)) {
+        match efi_boot_services_fn!(self.efi_boot_services(), locate_device_path)(
+            protocol as *const _ as *mut _,
+            device_path,
+            ptr::addr_of_mut!(device),
+        ) {
             s if s.is_error() => Err(s),
             _ => Ok(device),
         }
@@ -1063,12 +1127,8 @@ impl BootServices for StandardBootServices<'_> {
         controller_handle: efi::Handle,
         attribute: u32,
     ) -> Result<*mut c_void, efi::Status> {
-        let open_protocol = self.efi_boot_services().open_protocol;
-        if open_protocol as usize == 0 {
-            panic!("function not initialize.")
-        }
         let mut interface = ptr::null_mut();
-        match open_protocol(
+        match efi_boot_services_fn!(self.efi_boot_services(), open_protocol)(
             handle,
             protocol as *const _ as *mut _,
             ptr::addr_of_mut!(interface),
@@ -1088,11 +1148,12 @@ impl BootServices for StandardBootServices<'_> {
         agent_handle: efi::Handle,
         controller_handle: efi::Handle,
     ) -> Result<(), efi::Status> {
-        let close_protocol = self.efi_boot_services().close_protocol;
-        if close_protocol as usize == 0 {
-            panic!("function not initialize.")
-        }
-        match close_protocol(handle, protocol as *const _ as *mut _, agent_handle, controller_handle) {
+        match efi_boot_services_fn!(self.efi_boot_services(), close_protocol)(
+            handle,
+            protocol as *const _ as *mut _,
+            agent_handle,
+            controller_handle,
+        ) {
             s if s.is_error() => Err(s),
             _ => Ok(()),
         }
@@ -1106,43 +1167,38 @@ impl BootServices for StandardBootServices<'_> {
     where
         Self: Sized,
     {
-        let open_protocol_information = self.efi_boot_services().open_protocol_information;
-        if open_protocol_information as usize == 0 {
-            panic!("function not initialize.")
-        }
-
         let mut entry_buffer = ptr::null_mut();
         let mut entry_count = 0;
-        match open_protocol_information(
+        match efi_boot_services_fn!(self.efi_boot_services(), open_protocol_information)(
             handle,
             protocol as *const _ as *mut _,
             ptr::addr_of_mut!(entry_buffer),
             ptr::addr_of_mut!(entry_count),
         ) {
             s if s.is_error() => Err(s),
-            _ => Ok(unsafe { BootServicesBox::from_raw_parts(entry_buffer, entry_count, self) }),
+            _ => Ok(unsafe { BootServicesBox::from_raw_parts_mut(entry_buffer, entry_count, self) }),
         }
     }
 
     unsafe fn connect_controller(
         &self,
         controller_handle: efi::Handle,
-        mut driver_image_handle: Vec<efi::Handle>,
+        mut driver_image_handles: Vec<efi::Handle>,
         remaining_device_path: *mut efi::protocols::device_path::Protocol,
         recursive: bool,
     ) -> Result<(), efi::Status> {
-        let connect_controller = self.efi_boot_services().connect_controller;
-        if connect_controller as usize == 0 {
-            panic!("function not initialize.")
-        }
-
-        let driver_image_handle = if driver_image_handle.is_empty() {
+        let driver_image_handles = if driver_image_handles.is_empty() {
             ptr::null_mut()
         } else {
-            driver_image_handle.push(ptr::null_mut());
-            driver_image_handle.as_mut_ptr()
+            driver_image_handles.push(ptr::null_mut());
+            driver_image_handles.as_mut_ptr()
         };
-        match connect_controller(controller_handle, driver_image_handle, remaining_device_path, recursive.into()) {
+        match efi_boot_services_fn!(self.efi_boot_services(), connect_controller)(
+            controller_handle,
+            driver_image_handles,
+            remaining_device_path,
+            recursive.into(),
+        ) {
             s if s.is_error() => Err(s),
             _ => Ok(()),
         }
@@ -1154,11 +1210,7 @@ impl BootServices for StandardBootServices<'_> {
         driver_image_handle: Option<efi::Handle>,
         child_handle: Option<efi::Handle>,
     ) -> Result<(), efi::Status> {
-        let disconnect_controller = self.efi_boot_services().disconnect_controller;
-        if disconnect_controller as usize == 0 {
-            panic!("function not initialize.")
-        }
-        match disconnect_controller(
+        match efi_boot_services_fn!(self.efi_boot_services(), disconnect_controller)(
             controller_handle,
             driver_image_handle.unwrap_or(ptr::null_mut()),
             child_handle.unwrap_or(ptr::null_mut()),
@@ -1168,19 +1220,20 @@ impl BootServices for StandardBootServices<'_> {
         }
     }
 
-    fn protocols_per_handle(&self, handle: efi::Handle) -> Result<BootServicesBox<[efi::Guid], Self>, efi::Status> {
-        let protocols_per_handle = self.efi_boot_services().protocols_per_handle;
-        if protocols_per_handle as usize == 0 {
-            panic!("function not initialize.")
-        }
-
+    fn protocols_per_handle(
+        &self,
+        handle: efi::Handle,
+    ) -> Result<BootServicesBox<[&'static efi::Guid], Self>, efi::Status> {
         let mut protocol_buffer = ptr::null_mut();
         let mut protocol_buffer_count = 0;
-        match protocols_per_handle(handle, ptr::addr_of_mut!(protocol_buffer), ptr::addr_of_mut!(protocol_buffer_count))
-        {
+        match efi_boot_services_fn!(self.efi_boot_services(), protocols_per_handle)(
+            handle,
+            ptr::addr_of_mut!(protocol_buffer),
+            ptr::addr_of_mut!(protocol_buffer_count),
+        ) {
             s if s.is_error() => Err(s),
             _ => Ok(unsafe {
-                BootServicesBox::<[_], _>::from_raw_parts(protocol_buffer as *mut _, protocol_buffer_count, self)
+                BootServicesBox::<[_], _>::from_raw_parts_mut(protocol_buffer as *mut _, protocol_buffer_count, self)
             }),
         }
     }
@@ -1192,11 +1245,6 @@ impl BootServices for StandardBootServices<'_> {
     where
         Self: Sized,
     {
-        let locate_handle_buffer = self.efi_boot_services().locate_handle_buffer;
-        if locate_handle_buffer as usize == 0 {
-            panic!("function not initialize.")
-        }
-
         let mut buffer = ptr::null_mut();
         let mut buffer_count = 0;
         let protocol = match search_type {
@@ -1207,7 +1255,7 @@ impl BootServices for StandardBootServices<'_> {
             HandleSearchType::ByRegisterNotify(r) => r.as_ptr(),
             _ => ptr::null_mut(),
         };
-        match locate_handle_buffer(
+        match efi_boot_services_fn!(self.efi_boot_services(), locate_handle_buffer)(
             search_type.into(),
             protocol,
             search_key,
@@ -1215,9 +1263,9 @@ impl BootServices for StandardBootServices<'_> {
             ptr::addr_of_mut!(buffer),
         ) {
             s if s.is_error() => Err(s),
-            _ => {
-                Ok(unsafe { BootServicesBox::<[_], _>::from_raw_parts(buffer as *mut efi::Handle, buffer_count, self) })
-            }
+            _ => Ok(unsafe {
+                BootServicesBox::<[_], _>::from_raw_parts_mut(buffer as *mut efi::Handle, buffer_count, self)
+            }),
         }
     }
 
@@ -1226,12 +1274,12 @@ impl BootServices for StandardBootServices<'_> {
         protocol: &'static efi::Guid,
         registration: *mut c_void,
     ) -> Result<*mut c_void, efi::Status> {
-        let locate_protocol = self.efi_boot_services().locate_protocol;
-        if locate_protocol as usize == 0 {
-            panic!("function not initialize.")
-        }
         let mut interface = ptr::null_mut();
-        match locate_protocol(protocol as *const _ as *mut _, registration, ptr::addr_of_mut!(interface)) {
+        match efi_boot_services_fn!(self.efi_boot_services(), locate_protocol)(
+            protocol as *const _ as *mut _,
+            registration,
+            ptr::addr_of_mut!(interface),
+        ) {
             s if s.is_error() => Err(s),
             _ => Ok(interface),
         }
@@ -1274,7 +1322,7 @@ impl BootServices for StandardBootServices<'_> {
         ) {
             s if s.is_error() => {
                 let data = (!exit_data.as_ptr().is_null()).then(|| unsafe {
-                    BootServicesBox::from_raw_parts(
+                    BootServicesBox::from_raw_parts_mut(
                         exit_data.as_mut_ptr() as *mut u8,
                         exit_data_size.assume_init(),
                         self,
@@ -1382,26 +1430,91 @@ impl BootServices for StandardBootServices<'_> {
 
 #[cfg(test)]
 mod test {
-    use efi::{protocols::device_path, Boolean, Char16};
+    use c_ptr::CPtr;
+    use efi::{protocols::device_path, Boolean, Char16, OpenProtocolInformationEntry};
 
     use super::*;
-    use core::{mem::MaybeUninit, slice, sync::atomic::AtomicUsize, u64};
+    use core::{mem::MaybeUninit, ops::Deref, slice, sync::atomic::AtomicUsize, u32, u64};
+    use std::os::raw::c_void;
 
     macro_rules! boot_services {
-    ($($efi_services:ident = $efi_service_fn:ident),*) => {{
-      static BOOT_SERVICE: StandardBootServices = StandardBootServices::new_uninit();
-      let efi_boot_services = unsafe {
-        #[allow(unused_mut)]
-        let mut bs = MaybeUninit::<efi::BootServices>::zeroed();
-        $(
-          bs.assume_init_mut().$efi_services = $efi_service_fn;
-        )*
-        bs.assume_init()
-      };
-      BOOT_SERVICE.initialize(&efi_boot_services);
-      &BOOT_SERVICE
-    }};
-  }
+        ($($efi_services:ident = $efi_service_fn:ident),*) => {{
+            static BOOT_SERVICE: StandardBootServices = StandardBootServices::new_uninit();
+            let efi_boot_services = unsafe {
+                #[allow(unused_mut)]
+                let mut bs = MaybeUninit::<efi::BootServices>::zeroed();
+                $(
+                bs.assume_init_mut().$efi_services = $efi_service_fn;
+                )*
+                bs.assume_init()
+            };
+            BOOT_SERVICE.initialize(&efi_boot_services);
+            &BOOT_SERVICE
+        }};
+    }
+
+    static TEST_PROTOCOL_GUID: efi::Guid =
+        efi::Guid::from_bytes(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+
+    struct TestProtocol;
+    unsafe impl Protocol for TestProtocol {
+        type Interface = u32;
+
+        fn protocol_guid(&self) -> &'static efi::Guid {
+            &TEST_PROTOCOL_GUID
+        }
+    }
+
+    impl Deref for TestProtocol {
+        type Target = efi::Guid;
+
+        fn deref(&self) -> &Self::Target {
+            self.protocol_guid()
+        }
+    }
+
+    struct TestProtocolMarker;
+
+    unsafe impl Protocol for TestProtocolMarker {
+        type Interface = ();
+
+        fn protocol_guid(&self) -> &'static efi::Guid {
+            &TEST_PROTOCOL_GUID
+        }
+    }
+
+    impl Deref for TestProtocolMarker {
+        type Target = efi::Guid;
+
+        fn deref(&self) -> &Self::Target {
+            self.protocol_guid()
+        }
+    }
+
+    extern "efiapi" fn efi_allocate_pool_use_box(
+        _mem_type: efi::MemoryType,
+        size: usize,
+        buffer: *mut *mut c_void,
+    ) -> efi::Status {
+        // Use u64 for ptr alignment.
+        let allocation = vec![0 as u64; size.div_ceil(mem::size_of::<u64>())].into_boxed_slice();
+        unsafe {
+            *buffer = Box::into_raw(allocation) as *mut c_void;
+        }
+        efi::Status::SUCCESS
+    }
+
+    extern "efiapi" fn efi_free_pool_use_box(buffer: *mut c_void) -> efi::Status {
+        if buffer.is_null() {
+            return efi::Status::INVALID_PARAMETER;
+        }
+
+        unsafe {
+            let _ = Box::from_raw(buffer as *mut u8);
+        }
+
+        efi::Status::SUCCESS
+    }
 
     #[test]
     #[should_panic(expected = "Boot services is not initialize.")]
@@ -1420,10 +1533,10 @@ mod test {
     }
 
     #[test]
-    #[should_panic = "function not initialize."]
+    #[should_panic = "Boot services function create_event is not initialized."]
     fn test_create_event_not_init() {
         let boot_services = boot_services!();
-        let _ = boot_services.create_event(EventType::RUNTIME, Tpl::APPLICATION, None, &());
+        let _ = boot_services.create_event(EventType::RUNTIME, Tpl::APPLICATION, None, ());
     }
 
     #[test]
@@ -1478,23 +1591,23 @@ mod test {
             assert_eq!(efi::EVT_RUNTIME | efi::EVT_NOTIFY_SIGNAL, event_type);
             assert_eq!(efi::TPL_APPLICATION, notify_tpl);
             assert_eq!(None, notify_function);
-            assert_ne!(ptr::null_mut(), notify_context);
+            assert_eq!(ptr::null_mut(), notify_context);
             assert_ne!(ptr::null_mut(), event);
             efi::Status::SUCCESS
         }
 
         let status =
-            boot_services.create_event(EventType::RUNTIME | EventType::NOTIFY_SIGNAL, Tpl::APPLICATION, None, &());
+            boot_services.create_event(EventType::RUNTIME | EventType::NOTIFY_SIGNAL, Tpl::APPLICATION, None, ());
 
         assert!(matches!(status, Ok(_)));
     }
 
     #[test]
-    #[should_panic = "function not initialize."]
+    #[should_panic = "Boot services function create_event_ex is not initialized."]
     fn test_create_event_ex_not_init() {
         static GUID: efi::Guid = efi::Guid::from_fields(0, 0, 0, 0, 0, &[0; 6]);
         let boot_services = boot_services!();
-        let _ = boot_services.create_event_ex(EventType::RUNTIME, Tpl::APPLICATION, None, &(), &GUID);
+        let _ = boot_services.create_event_ex(EventType::RUNTIME, Tpl::APPLICATION, None, (), &GUID);
     }
 
     #[test]
@@ -1553,7 +1666,7 @@ mod test {
             assert_eq!(efi::EVT_RUNTIME | efi::EVT_NOTIFY_SIGNAL, event_type);
             assert_eq!(efi::TPL_APPLICATION, notify_tpl);
             assert_eq!(None, notify_function);
-            assert_ne!(ptr::null(), notify_context);
+            assert_eq!(ptr::null(), notify_context);
             assert_eq!(ptr::addr_of!(GUID), event_group);
             assert_ne!(ptr::null_mut(), event);
             efi::Status::SUCCESS
@@ -1563,7 +1676,7 @@ mod test {
             EventType::RUNTIME | EventType::NOTIFY_SIGNAL,
             Tpl::APPLICATION,
             None,
-            &(),
+            (),
             &GUID,
         );
 
@@ -1571,7 +1684,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic = "function not initialize."]
+    #[should_panic = "Boot services function close_event is not initialized."]
     fn test_close_event_not_init() {
         let boot_services = boot_services!();
         let _ = boot_services.close_event(ptr::null_mut());
@@ -1592,7 +1705,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic = "function not initialize."]
+    #[should_panic = "Boot services function signal_event is not initialized."]
     fn test_signal_event_not_init() {
         let boot_services = boot_services!();
         let _ = boot_services.signal_event(ptr::null_mut());
@@ -1613,7 +1726,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic = "function not initialize."]
+    #[should_panic = "Boot services function wait_for_event is not initialized."]
     fn test_wait_for_event_not_init() {
         let boot_services = boot_services!();
         let mut events = vec![];
@@ -1642,7 +1755,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic = "function not initialize."]
+    #[should_panic = "Boot services function check_event is not initialized."]
     fn test_check_event_not_init() {
         let boot_services = boot_services!();
         let _ = boot_services.check_event(ptr::null_mut());
@@ -1663,7 +1776,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic = "function not initialize."]
+    #[should_panic = "Boot services function set_timer is not initialized."]
     fn test_set_timer_not_init() {
         let boot_services = boot_services!();
         let _ = boot_services.set_timer(ptr::null_mut(), EventTimerType::Relative, 0);
@@ -1709,7 +1822,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic = "function not initialize."]
+    #[should_panic = "Boot services function raise_tpl is not initialized."]
     fn test_raise_tpl_not_init() {
         let boot_services = boot_services!();
         let _ = boot_services.raise_tpl(Tpl::CALLBACK);
@@ -1729,7 +1842,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic = "function not initialize."]
+    #[should_panic = "Boot services function restore_tpl is not initialized."]
     fn test_restore_tpl_not_init() {
         let boot_services = boot_services!();
         let _ = boot_services.restore_tpl(Tpl::APPLICATION);
@@ -1747,7 +1860,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic = "function not initialize."]
+    #[should_panic = "Boot services function allocate_pages is not initialized."]
     fn test_allocate_pages_not_init() {
         let boot_services = boot_services!();
         let _ = boot_services.allocate_pages(AllocType::AnyPage, MemoryType::ACPI_MEMORY_NVS, 0);
@@ -1804,6 +1917,13 @@ mod test {
     }
 
     #[test]
+    #[should_panic = "Boot services function free_pages is not initialized."]
+    fn test_free_pages_not_init() {
+        let boot_services = boot_services!();
+        _ = boot_services.free_pages(0, 0);
+    }
+
+    #[test]
     fn test_free_pages() {
         let boot_services = boot_services!(free_pages = efi_free_pages);
 
@@ -1816,6 +1936,13 @@ mod test {
 
         let status = boot_services.free_pages(0x100000, 10);
         assert!(matches!(status, Ok(())));
+    }
+
+    #[test]
+    #[should_panic = "Boot services function allocate_pool is not initialized."]
+    fn test_allocate_pool_not_init() {
+        let boot_services = boot_services!();
+        _ = boot_services.allocate_pool(MemoryType::RESERVED_MEMORY_TYPE, 0);
     }
 
     #[test]
@@ -1861,41 +1988,736 @@ mod test {
     }
 
     #[test]
-    fn test_locate_protocol() {
-        const DEVICE_PATH_PROTOCOL: protocol_handler::DevicePath = protocol_handler::DevicePath {};
-        use r_efi::protocols::device_path;
-        static DEVICE_PATH_PROTOCOL_INTERFACE: device_path::Protocol = unsafe { MaybeUninit::zeroed().assume_init() };
-        let boot_services = boot_services!(locate_protocol = efi_locate_protocol);
-
-        extern "efiapi" fn efi_locate_protocol(
-            protocol_guid: *mut efi::Guid,
-            registration: *mut c_void,
-            interface: *mut *mut c_void,
-        ) -> efi::Status {
-            unsafe {
-                assert!(!protocol_guid.is_null(), "Protocol guid should not be null");
-                assert!(registration.is_null(), "Registration should be a null pointer");
-                assert!(!interface.is_null(), "Interface should not be a null pointer");
-                assert_eq!(
-                    protocol_guid.as_mut().unwrap(),
-                    &device_path::PROTOCOL_GUID,
-                    "Protocol guid should have been Device Path guid"
-                );
-                interface.write(
-                    &DEVICE_PATH_PROTOCOL_INTERFACE as *const device_path::Protocol as *const c_void as *mut c_void,
-                );
-            }
-
-            efi::Status::SUCCESS
-        }
-
-        let result = boot_services.locate_protocol(&DEVICE_PATH_PROTOCOL, None);
-        assert!(matches!(result, Ok(Some(protocol)) if std::ptr::eq(protocol, &DEVICE_PATH_PROTOCOL_INTERFACE)));
+    #[should_panic = "Boot services function install_protocol_interface is not initialized."]
+    fn test_install_protocol_interface_not_init() {
+        let boot_services = boot_services!();
+        let _ = boot_services.install_protocol_interface(None, &TestProtocol, Box::new(0));
     }
 
     #[test]
-    fn test_locate_protocol_indicator_protocol() {
-        const DEVICE_PATH_PROTOCOL: protocol_handler::DevicePath = protocol_handler::DevicePath {};
+    fn test_install_protocol_interface() {
+        let boot_services = boot_services!(install_protocol_interface = efi_install_protocol_interface);
+
+        extern "efiapi" fn efi_install_protocol_interface(
+            handle: *mut efi::Handle,
+            guid: *mut efi::Guid,
+            interface_type: u32,
+            interface: *mut c_void,
+        ) -> efi::Status {
+            assert_ne!(ptr::null_mut(), handle);
+            assert_eq!(ptr::null_mut(), unsafe { ptr::read(handle) });
+            assert_eq!(TEST_PROTOCOL_GUID, unsafe { ptr::read(guid) });
+            assert_eq!(efi::NATIVE_INTERFACE, interface_type);
+            assert_eq!(42, unsafe { ptr::read(interface as *mut u32) });
+
+            unsafe {
+                ptr::write(handle, 17 as usize as _);
+            }
+
+            efi::Status::SUCCESS
+        }
+
+        let (handle, _) = boot_services.install_protocol_interface(None, &TestProtocol, Box::new(42)).unwrap();
+
+        assert_eq!(17, handle as usize);
+    }
+
+    #[test]
+    fn test_install_protocol_marker() {
+        let boot_services = boot_services!(install_protocol_interface = efi_install_protocol_interface);
+
+        extern "efiapi" fn efi_install_protocol_interface(
+            handle: *mut efi::Handle,
+            guid: *mut efi::Guid,
+            interface_type: u32,
+            interface: *mut c_void,
+        ) -> efi::Status {
+            assert_ne!(ptr::null_mut(), handle);
+            assert_eq!(ptr::null_mut(), unsafe { ptr::read(handle) });
+            assert_eq!(TEST_PROTOCOL_GUID, unsafe { ptr::read(guid) });
+            assert_eq!(efi::NATIVE_INTERFACE, interface_type);
+            assert_eq!(ptr::null_mut(), interface);
+
+            unsafe {
+                ptr::write(handle, 17 as usize as _);
+            }
+
+            efi::Status::SUCCESS
+        }
+
+        let handle = boot_services.install_protocol_marker(None, &TestProtocolMarker).unwrap();
+
+        assert_eq!(17, handle as usize);
+    }
+
+    #[test]
+    #[should_panic = "Marker interface are not supported by install_protocol_interface, use install_protocol_marker instead."]
+    fn test_install_protocol_marker_with_intall_protocol_interface() {
+        let boot_services = boot_services!(install_protocol_interface = efi_install_protocol_interface);
+
+        extern "efiapi" fn efi_install_protocol_interface(
+            _handle: *mut efi::Handle,
+            _guid: *mut efi::Guid,
+            _interface_type: u32,
+            _interface: *mut c_void,
+        ) -> efi::Status {
+            efi::Status::SUCCESS
+        }
+
+        _ = boot_services.install_protocol_interface(None, &TestProtocolMarker, Box::new(())).unwrap();
+    }
+    #[test]
+    #[should_panic = "Boot services function uninstall_protocol_interface is not initialized."]
+    fn test_uninstall_protocol_interface_not_init() {
+        let boot_services = boot_services!();
+        let b = Box::new(10);
+        let key = CPtr::metadata(&b);
+        _ = boot_services.uninstall_protocol_interface(ptr::null_mut(), &TestProtocol, key);
+    }
+
+    #[test]
+    fn test_uninstall_protocol_interface() {
+        let boot_services = boot_services!(uninstall_protocol_interface = efi_uninstall_protocol_interface);
+
+        static ADDR: AtomicUsize = AtomicUsize::new(0);
+
+        extern "efiapi" fn efi_uninstall_protocol_interface(
+            handle: efi::Handle,
+            protocol: *mut efi::Guid,
+            interface: *mut c_void,
+        ) -> efi::Status {
+            assert_eq!(1, handle as usize);
+            assert_eq!(TEST_PROTOCOL_GUID, unsafe { ptr::read(protocol) });
+            assert_eq!(ADDR.load(Ordering::Relaxed), interface as usize);
+            efi::Status::SUCCESS
+        }
+        let b = Box::new(10);
+        let key = b.metadata();
+        ADDR.store(key.ptr_value, Ordering::Relaxed);
+        let ptr = b.into_ptr();
+        let interface = boot_services.uninstall_protocol_interface(1 as usize as _, &TestProtocol, key).unwrap();
+        assert_eq!(ptr, interface.as_ptr());
+    }
+
+    #[test]
+    fn test_uninstall_protocol_marker() {
+        let boot_services = boot_services!(uninstall_protocol_interface = efi_uninstall_protocol_interface);
+
+        extern "efiapi" fn efi_uninstall_protocol_interface(
+            handle: efi::Handle,
+            protocol: *mut efi::Guid,
+            interface: *mut c_void,
+        ) -> efi::Status {
+            assert_eq!(1, handle as usize);
+            assert_eq!(TEST_PROTOCOL_GUID, unsafe { ptr::read(protocol) });
+            assert_eq!(ptr::null_mut(), interface);
+            efi::Status::SUCCESS
+        }
+        _ = boot_services.uninstall_protocol_marker(1 as usize as _, &TestProtocolMarker).unwrap();
+    }
+
+    #[test]
+    #[should_panic = "Boot services function reinstall_protocol_interface is not initialized."]
+    fn test_reinstall_protocol_interface_not_init() {
+        let boot_services = boot_services!();
+        let b = Box::new(10);
+        let key = CPtr::metadata(&b);
+        _ = boot_services.reinstall_protocol_interface(ptr::null_mut(), &TestProtocol, key, Box::new(10));
+    }
+
+    #[test]
+    fn test_reinstall_protocol_interface() {
+        let boot_services = boot_services!(reinstall_protocol_interface = efi_reinstall_protocol_interface);
+
+        extern "efiapi" fn efi_reinstall_protocol_interface(
+            handle: efi::Handle,
+            protocol: *mut efi::Guid,
+            old_interface: *mut c_void,
+            new_interface: *mut c_void,
+        ) -> efi::Status {
+            assert_eq!(1, handle as usize);
+            assert_eq!(TEST_PROTOCOL_GUID, unsafe { ptr::read(protocol) });
+            assert_ne!(ptr::null_mut(), old_interface);
+            assert_ne!(ptr::null_mut(), new_interface);
+            efi::Status::SUCCESS
+        }
+
+        let old_interface = Box::new(10);
+        let old_key = CPtr::metadata(&old_interface);
+        let old_ptr = old_interface.into_ptr();
+        let new_interface = Box::new(10);
+        let new_ptr = new_interface.as_ptr();
+        let (new_key, old_interface) =
+            boot_services.reinstall_protocol_interface(1 as usize as _, &TestProtocol, old_key, new_interface).unwrap();
+        assert_eq!(new_key.ptr_value, new_ptr as usize);
+        assert_eq!(old_ptr, old_interface.into_ptr());
+    }
+
+    #[test]
+    #[should_panic = "Boot services function register_protocol_notify is not initialized."]
+    fn test_register_protocol_notify_not_init() {
+        let boot_services = boot_services!();
+        _ = boot_services.register_protocol_notify(&TEST_PROTOCOL_GUID, ptr::null_mut());
+    }
+
+    #[test]
+    fn test_register_protocol_notify() {
+        let boot_services = boot_services!(register_protocol_notify = efi_register_protocol_notify);
+
+        extern "efiapi" fn efi_register_protocol_notify(
+            protocol: *mut efi::Guid,
+            event: *mut c_void,
+            registration: *mut *mut c_void,
+        ) -> efi::Status {
+            assert_eq!(TEST_PROTOCOL_GUID, unsafe { ptr::read(protocol) });
+            assert_eq!(1, event as usize);
+            assert_ne!(ptr::null_mut(), registration);
+            unsafe { ptr::write(registration, 10 as usize as _) };
+            efi::Status::SUCCESS
+        }
+
+        let registration = boot_services.register_protocol_notify(&TEST_PROTOCOL_GUID, 1 as usize as _).unwrap();
+        assert_eq!(10, registration.as_ptr() as usize);
+    }
+
+    #[test]
+    #[should_panic = "Boot services function locate_handle is not initialized."]
+    fn test_locate_handle_not_init() {
+        let boot_services = boot_services!();
+        _ = boot_services.locate_handle(HandleSearchType::AllHandle);
+    }
+
+    #[test]
+    fn test_locate_handle_all_handles() {
+        let boot_services = boot_services!(
+            locate_handle = efi_locate_handle,
+            allocate_pool = efi_allocate_pool_use_box,
+            free_pool = efi_free_pool_use_box
+        );
+
+        extern "efiapi" fn efi_locate_handle(
+            search_type: efi::LocateSearchType,
+            protocol: *mut efi::Guid,
+            search_key: *mut c_void,
+            buffer_size: *mut usize,
+            buffer: *mut efi::Handle,
+        ) -> efi::Status {
+            assert_eq!(efi::ALL_HANDLES, search_type);
+            assert_eq!(ptr::null_mut(), protocol);
+            assert_eq!(ptr::null_mut(), search_key);
+            assert_ne!(ptr::null_mut(), buffer_size);
+
+            match buffer {
+                buffer if buffer.is_null() => {
+                    assert_eq!(0, unsafe { ptr::read(buffer_size) });
+                    unsafe { ptr::write(buffer_size, 1 * mem::size_of::<usize>()) };
+                }
+                _ => {
+                    unsafe { ptr::write(buffer, 10 as usize as _) };
+                }
+            }
+
+            efi::Status::SUCCESS
+        }
+
+        let handles = boot_services.locate_handle(HandleSearchType::AllHandle).unwrap();
+        assert_eq!(1, handles.len());
+        assert_eq!(10, handles[0] as usize);
+    }
+
+    #[test]
+    fn test_locate_handle_by_protocol() {
+        let boot_services = boot_services!(
+            locate_handle = efi_locate_handle,
+            allocate_pool = efi_allocate_pool_use_box,
+            free_pool = efi_free_pool_use_box
+        );
+
+        extern "efiapi" fn efi_locate_handle(
+            search_type: efi::LocateSearchType,
+            protocol: *mut efi::Guid,
+            search_key: *mut c_void,
+            buffer_size: *mut usize,
+            buffer: *mut efi::Handle,
+        ) -> efi::Status {
+            assert_eq!(efi::BY_PROTOCOL, search_type);
+            assert_eq!(TEST_PROTOCOL_GUID, unsafe { ptr::read(protocol) });
+            assert_eq!(ptr::null_mut(), search_key);
+            assert_ne!(ptr::null_mut(), buffer_size);
+
+            match buffer {
+                buffer if buffer.is_null() => {
+                    assert_eq!(0, unsafe { ptr::read(buffer_size) });
+                    unsafe { ptr::write(buffer_size, 1 * mem::size_of::<usize>()) };
+                }
+                _ => {
+                    unsafe { ptr::write(buffer, 10 as usize as _) };
+                }
+            }
+
+            efi::Status::SUCCESS
+        }
+
+        let handles = boot_services.locate_handle(HandleSearchType::ByProtocol(&TestProtocol)).unwrap();
+        assert_eq!(1, handles.len());
+        assert_eq!(10, handles[0] as usize);
+    }
+
+    #[test]
+    fn test_locate_handle_by_registry_notify() {
+        let boot_services = boot_services!(
+            locate_handle = efi_locate_handle,
+            allocate_pool = efi_allocate_pool_use_box,
+            free_pool = efi_free_pool_use_box
+        );
+
+        extern "efiapi" fn efi_locate_handle(
+            search_type: efi::LocateSearchType,
+            protocol: *mut efi::Guid,
+            search_key: *mut c_void,
+            buffer_size: *mut usize,
+            buffer: *mut efi::Handle,
+        ) -> efi::Status {
+            assert_eq!(efi::BY_REGISTER_NOTIFY, search_type);
+            assert_eq!(ptr::null_mut(), protocol);
+            assert_eq!(10, search_key as usize);
+            assert_ne!(ptr::null_mut(), buffer_size);
+
+            match buffer {
+                buffer if buffer.is_null() => {
+                    assert_eq!(0, unsafe { ptr::read(buffer_size) });
+                    unsafe { ptr::write(buffer_size, 1 * mem::size_of::<usize>()) };
+                }
+                _ => {
+                    unsafe { ptr::write(buffer, 10 as usize as _) };
+                }
+            }
+
+            efi::Status::SUCCESS
+        }
+
+        let handles = boot_services
+            .locate_handle(HandleSearchType::ByRegisterNotify(unsafe { NonNull::new_unchecked(10 as usize as _) }))
+            .unwrap();
+        assert_eq!(1, handles.len());
+        assert_eq!(10, handles[0] as usize);
+    }
+
+    #[test]
+    #[should_panic = "Boot services function handle_protocol is not initialized."]
+    fn test_handle_protocol_not_init() {
+        let boot_services = boot_services!();
+        _ = unsafe { boot_services.handle_protocol(ptr::null_mut(), &TestProtocol) };
+    }
+
+    #[test]
+    fn test_handle_protocol() {
+        let boot_services = boot_services!(handle_protocol = efi_handle_protocol);
+
+        extern "efiapi" fn efi_handle_protocol(
+            handle: *mut c_void,
+            protocol: *mut efi::Guid,
+            interface: *mut *mut c_void,
+        ) -> efi::Status {
+            assert_eq!(1, handle as usize);
+            assert_eq!(TEST_PROTOCOL_GUID, unsafe { ptr::read(protocol) });
+            assert_ne!(ptr::null_mut(), interface);
+            let b = Box::new(12);
+            unsafe { ptr::write(interface, b.into_mut_ptr() as *mut _) };
+            efi::Status::SUCCESS
+        }
+
+        let interface = unsafe { boot_services.handle_protocol(1 as usize as _, &TestProtocol) }.unwrap();
+        assert_eq!(12, *interface);
+    }
+
+    #[test]
+    fn test_handle_protocol_marker() {
+        let boot_services = boot_services!(handle_protocol = efi_handle_protocol);
+
+        extern "efiapi" fn efi_handle_protocol(
+            handle: *mut c_void,
+            protocol: *mut efi::Guid,
+            interface: *mut *mut c_void,
+        ) -> efi::Status {
+            assert_eq!(1, handle as usize);
+            assert_eq!(TEST_PROTOCOL_GUID, unsafe { ptr::read(protocol) });
+            assert_ne!(ptr::null_mut(), interface);
+            efi::Status::SUCCESS
+        }
+
+        boot_services.handle_protocol_marker(1 as usize as _, &TestProtocolMarker).unwrap();
+    }
+
+    #[test]
+    #[should_panic = "Marker interface are not supported with handle_protocol function, use handle_protocol_marker instead."]
+    fn test_handle_protocol_with_marker_interface() {
+        let boot_services = boot_services!(handle_protocol = efi_handle_protocol);
+
+        extern "efiapi" fn efi_handle_protocol(
+            _handle: *mut c_void,
+            _protocol: *mut efi::Guid,
+            _interface: *mut *mut c_void,
+        ) -> efi::Status {
+            efi::Status::SUCCESS
+        }
+
+        _ = unsafe { boot_services.handle_protocol(1 as usize as _, &TestProtocolMarker) };
+    }
+
+    #[test]
+    #[should_panic = "Boot services function locate_device_path is not initialized."]
+    fn test_locate_device_path_not_init() {
+        let boot_services = boot_services!();
+        _ = unsafe { boot_services.locate_device_path(&TestProtocol, ptr::null_mut()) };
+    }
+
+    #[test]
+    fn test_locate_device_path() {
+        let boot_services = boot_services!(locate_device_path = efi_locate_device_path);
+
+        extern "efiapi" fn efi_locate_device_path(
+            protocol: *mut efi::Guid,
+            device_path: *mut *mut device_path::Protocol,
+            device: *mut efi::Handle,
+        ) -> efi::Status {
+            assert_eq!(TEST_PROTOCOL_GUID, unsafe { ptr::read(protocol) });
+            assert_eq!(1, device_path as usize);
+            assert_ne!(ptr::null_mut(), device);
+            unsafe { ptr::write(device, 12 as usize as _) };
+            efi::Status::SUCCESS
+        }
+
+        let handle = unsafe { boot_services.locate_device_path(&TestProtocol, 1 as usize as _) }.unwrap();
+        assert_eq!(12, handle as usize);
+    }
+
+    #[test]
+    #[should_panic = "Boot services function open_protocol is not initialized."]
+    fn test_open_protocol_not_init() {
+        let boot_services = boot_services!();
+        _ = unsafe { boot_services.open_protocol(ptr::null_mut(), &TestProtocol, ptr::null_mut(), ptr::null_mut(), 0) };
+    }
+
+    #[test]
+    fn test_open_protocol() {
+        let boot_services = boot_services!(open_protocol = efi_open_protocol);
+
+        extern "efiapi" fn efi_open_protocol(
+            handle: efi::Handle,
+            protocol: *mut efi::Guid,
+            interface: *mut *mut c_void,
+            agent_handle: efi::Handle,
+            controller_handle: efi::Handle,
+            attributes: u32,
+        ) -> efi::Status {
+            assert_eq!(1, handle as usize);
+            assert_eq!(TEST_PROTOCOL_GUID, unsafe { ptr::read(protocol) });
+            assert_ne!(ptr::null_mut(), interface);
+            assert_eq!(2, agent_handle as usize);
+            assert_eq!(3, controller_handle as usize);
+            assert_eq!(4, attributes);
+
+            let b = Box::new(12);
+            unsafe { ptr::write(interface, b.into_mut_ptr() as _) };
+
+            efi::Status::SUCCESS
+        }
+
+        let interface = unsafe {
+            boot_services.open_protocol(1 as usize as _, &TestProtocol, 2 as usize as _, 3 as usize as _, 4).unwrap()
+        };
+        assert_eq!(12, *interface)
+    }
+
+    #[test]
+    fn test_open_protocol_marker() {
+        let boot_services = boot_services!(open_protocol = efi_open_protocol);
+
+        extern "efiapi" fn efi_open_protocol(
+            handle: efi::Handle,
+            protocol: *mut efi::Guid,
+            interface: *mut *mut c_void,
+            agent_handle: efi::Handle,
+            controller_handle: efi::Handle,
+            attributes: u32,
+        ) -> efi::Status {
+            assert_eq!(1, handle as usize);
+            assert_eq!(TEST_PROTOCOL_GUID, unsafe { ptr::read(protocol) });
+            assert_ne!(ptr::null_mut(), interface);
+            assert_eq!(2, agent_handle as usize);
+            assert_eq!(3, controller_handle as usize);
+            assert_eq!(4, attributes);
+            efi::Status::SUCCESS
+        }
+
+        boot_services
+            .open_protocol_marker(1 as usize as _, &TestProtocolMarker, 2 as usize as _, 3 as usize as _, 4)
+            .unwrap()
+    }
+
+    #[test]
+    #[should_panic = "Marker interface are not supported with open_protocol function, use open_protocol_marker instead."]
+    fn test_open_protocol_with_marker_interface() {
+        let boot_services = boot_services!(open_protocol = efi_open_protocol);
+
+        extern "efiapi" fn efi_open_protocol(
+            _handle: efi::Handle,
+            _protocol: *mut efi::Guid,
+            _interface: *mut *mut c_void,
+            _agent_handle: efi::Handle,
+            _controller_handle: efi::Handle,
+            _attributes: u32,
+        ) -> efi::Status {
+            efi::Status::SUCCESS
+        }
+
+        let _ = unsafe {
+            boot_services.open_protocol(1 as usize as _, &TestProtocolMarker, 2 as usize as _, 3 as usize as _, 4)
+        };
+    }
+
+    #[test]
+    #[should_panic = "Boot services function close_protocol is not initialized."]
+    fn test_close_protocol_not_init() {
+        let boot_services = boot_services!();
+        _ = boot_services.close_protocol(ptr::null_mut(), &TestProtocol, ptr::null_mut(), ptr::null_mut());
+    }
+
+    #[test]
+    fn test_close_protocol() {
+        let boot_services = boot_services!(close_protocol = efi_close_protocol);
+
+        extern "efiapi" fn efi_close_protocol(
+            handle: efi::Handle,
+            protocol: *mut efi::Guid,
+            agent_handle: efi::Handle,
+            controller_handle: efi::Handle,
+        ) -> efi::Status {
+            assert_eq!(1, handle as usize);
+            assert_eq!(TEST_PROTOCOL_GUID, unsafe { ptr::read(protocol) });
+            assert_eq!(2, agent_handle as usize);
+            assert_eq!(3, controller_handle as usize);
+
+            efi::Status::SUCCESS
+        }
+
+        _ = boot_services.close_protocol(1 as usize as _, &TestProtocol, 2 as usize as _, 3 as usize as _).unwrap();
+    }
+
+    #[test]
+    #[should_panic = "Boot services function open_protocol_information is not initialized."]
+    fn test_open_protocol_information_not_init() {
+        let boot_services = boot_services!();
+        _ = boot_services.open_protocol_information(ptr::null_mut(), &TestProtocol);
+    }
+
+    #[test]
+    fn test_open_protocol_information() {
+        let boot_services = boot_services!(
+            open_protocol_information = efi_open_protocol_information,
+            free_pool = efi_free_pool_use_box
+        );
+
+        extern "efiapi" fn efi_open_protocol_information(
+            handle: efi::Handle,
+            protocol: *mut efi::Guid,
+            entry_buffer: *mut *mut efi::OpenProtocolInformationEntry,
+            entry_count: *mut usize,
+        ) -> efi::Status {
+            assert_eq!(1, handle as usize);
+            assert_eq!(TEST_PROTOCOL_GUID, unsafe { ptr::read(protocol) });
+            assert_ne!(ptr::null_mut(), entry_buffer);
+            assert_ne!(ptr::null_mut(), entry_count);
+
+            let buff = Box::new([efi::OpenProtocolInformationEntry {
+                agent_handle: ptr::null_mut(),
+                controller_handle: ptr::null_mut(),
+                attributes: 10,
+                open_count: 0,
+            }])
+            .into_mut_ptr() as *mut OpenProtocolInformationEntry;
+
+            unsafe {
+                ptr::write(entry_buffer, buff);
+                ptr::write(entry_count, 1)
+            };
+
+            efi::Status::SUCCESS
+        }
+
+        let info = boot_services.open_protocol_information(1 as usize as _, &TestProtocol).unwrap();
+        assert_eq!(1, info.len());
+        assert_eq!(10, info[0].attributes);
+    }
+
+    #[test]
+    #[should_panic = "Boot services function connect_controller is not initialized."]
+    fn test_connect_controller_not_init() {
+        let boot_services = boot_services!();
+        _ = unsafe { boot_services.connect_controller(ptr::null_mut(), vec![], ptr::null_mut(), false) };
+    }
+
+    #[test]
+    fn test_connect_controller() {
+        let boot_services = boot_services!(connect_controller = efi_connect_controller);
+
+        extern "efiapi" fn efi_connect_controller(
+            controller_handle: efi::Handle,
+            driver_image_handles: *mut efi::Handle,
+            remaining_device_path: *mut device_path::Protocol,
+            recursive: Boolean,
+        ) -> efi::Status {
+            assert_eq!(1, controller_handle as usize);
+            assert_eq!(ptr::null_mut(), driver_image_handles);
+            assert_eq!(2, remaining_device_path as usize);
+            assert_eq!(false, recursive.into());
+            efi::Status::SUCCESS
+        }
+
+        _ = unsafe { boot_services.connect_controller(1 as usize as _, vec![], 2 as usize as _, false) }.unwrap();
+    }
+
+    #[test]
+    fn test_connect_controller_with_image_handles() {
+        let boot_services = boot_services!(connect_controller = efi_connect_controller);
+
+        extern "efiapi" fn efi_connect_controller(
+            controller_handle: efi::Handle,
+            driver_image_handles: *mut efi::Handle,
+            remaining_device_path: *mut device_path::Protocol,
+            recursive: Boolean,
+        ) -> efi::Status {
+            assert_eq!(1, controller_handle as usize);
+            assert_ne!(ptr::null_mut(), driver_image_handles);
+            let image_handles = unsafe { slice::from_raw_parts(driver_image_handles as *const usize, 3) };
+            assert_eq!([1, 2, 0], image_handles);
+            assert_eq!(2, remaining_device_path as usize);
+            assert_eq!(false, recursive.into());
+            efi::Status::SUCCESS
+        }
+
+        _ = unsafe {
+            boot_services.connect_controller(
+                1 as usize as _,
+                vec![1 as usize as _, 2 as usize as _],
+                2 as usize as _,
+                false,
+            )
+        }
+        .unwrap();
+    }
+
+    #[test]
+    #[should_panic = "Boot services function disconnect_controller is not initialized."]
+    fn test_disconnect_controller_not_init() {
+        let boot_services = boot_services!();
+        _ = boot_services.disconnect_controller(ptr::null_mut(), None, None);
+    }
+
+    #[test]
+    fn test_disconnect_controller() {
+        let boot_services = boot_services!(disconnect_controller = efi_disconnect_controller);
+
+        extern "efiapi" fn efi_disconnect_controller(
+            controller_handle: efi::Handle,
+            driver_image_handle: efi::Handle,
+            child_handle: efi::Handle,
+        ) -> efi::Status {
+            assert_eq!(1, controller_handle as usize);
+            assert_eq!(ptr::null_mut(), driver_image_handle);
+            assert_eq!(ptr::null_mut(), child_handle);
+            efi::Status::SUCCESS
+        }
+        _ = boot_services.disconnect_controller(1 as usize as _, None, None).unwrap();
+    }
+
+    #[test]
+    fn test_disconnect_controller_with_handles() {
+        let boot_services = boot_services!(disconnect_controller = efi_disconnect_controller);
+
+        extern "efiapi" fn efi_disconnect_controller(
+            controller_handle: efi::Handle,
+            driver_image_handle: efi::Handle,
+            child_handle: efi::Handle,
+        ) -> efi::Status {
+            assert_eq!(1, controller_handle as usize);
+            assert_eq!(2, driver_image_handle as usize);
+            assert_eq!(3, child_handle as usize);
+            efi::Status::SUCCESS
+        }
+        _ = boot_services.disconnect_controller(1 as usize as _, Some(2 as usize as _), Some(3 as usize as _)).unwrap();
+    }
+
+    #[test]
+    #[should_panic = "Boot services function protocols_per_handle is not initialized."]
+    fn test_protocol_per_handle_not_init() {
+        let boot_services = boot_services!();
+        _ = boot_services.protocols_per_handle(ptr::null_mut());
+    }
+
+    #[test]
+    fn test_protocol_per_handle() {
+        let boot_services =
+            boot_services!(protocols_per_handle = efi_protocol_per_handle, free_pool = efi_free_pool_use_box);
+
+        extern "efiapi" fn efi_protocol_per_handle(
+            handle: efi::Handle,
+            protocol_buffer: *mut *mut *mut efi::Guid,
+            protocol_buffer_count: *mut usize,
+        ) -> efi::Status {
+            assert_eq!(1, handle as usize);
+            assert_ne!(ptr::null_mut(), protocol_buffer);
+            assert_ne!(ptr::null_mut(), protocol_buffer_count);
+
+            #[allow(unused_allocation)]
+            let buff = Box::new(ptr::addr_of!(TEST_PROTOCOL_GUID) as *mut efi::Guid).into_mut_ptr();
+
+            unsafe {
+                ptr::write(protocol_buffer, buff);
+                ptr::write(protocol_buffer_count, 1);
+            }
+
+            efi::Status::SUCCESS
+        }
+
+        let protocols = boot_services.protocols_per_handle(1 as usize as _).unwrap();
+        assert_eq!(1, protocols.len());
+        assert_eq!(TEST_PROTOCOL_GUID, *protocols[0]);
+    }
+
+    #[test]
+    #[should_panic = "Boot services function locate_protocol is not initialized."]
+    fn test_locate_protocol_not_init() {
+        let boot_services = boot_services!();
+        _ = unsafe { boot_services.locate_protocol(&TestProtocol, None) };
+    }
+
+    #[test]
+    fn test_locate_protocol() {
+        let boot_services = boot_services!(locate_protocol = efi_locate_protocol);
+
+        static PROTOCOL_INTERFACE: u32 = 10;
+
+        extern "efiapi" fn efi_locate_protocol(
+            protocol_guid: *mut efi::Guid,
+            registration: *mut c_void,
+            interface: *mut *mut c_void,
+        ) -> efi::Status {
+            assert!(!protocol_guid.is_null());
+            assert!(registration.is_null());
+            assert!(!interface.is_null());
+            assert_eq!(unsafe { ptr::read(protocol_guid) }, TEST_PROTOCOL_GUID);
+            unsafe { ptr::write(interface, &PROTOCOL_INTERFACE as *const u32 as *mut u32 as *mut c_void) };
+            efi::Status::SUCCESS
+        }
+
+        let protocol = unsafe { boot_services.locate_protocol(&TestProtocol, None) }.unwrap();
+        assert_eq!(PROTOCOL_INTERFACE, *protocol);
+    }
+
+    #[test]
+    fn test_locate_protocol_marker() {
         let boot_services = boot_services!(locate_protocol = efi_locate_protocol);
 
         extern "efiapi" fn efi_locate_protocol(
@@ -1903,25 +2725,30 @@ mod test {
             registration: *mut c_void,
             interface: *mut *mut c_void,
         ) -> efi::Status {
-            use r_efi::protocols::device_path;
-            unsafe {
-                assert!(!protocol_guid.is_null(), "Protocol guid should not be null");
-                assert!(registration.is_null(), "Registration should be a null pointer");
-                assert!(!interface.is_null(), "Interface should not be a null pointer");
-                assert_eq!(
-                    protocol_guid.as_mut().unwrap(),
-                    &device_path::PROTOCOL_GUID,
-                    "Protocol guid should have been Device Path guid"
-                );
-                // set to null to simulate an indicator protocol
-                interface.write(core::ptr::null_mut());
-            }
-
+            assert!(!protocol_guid.is_null());
+            assert!(registration.is_null());
+            assert!(!interface.is_null());
+            assert_eq!(unsafe { ptr::read(protocol_guid) }, TEST_PROTOCOL_GUID);
             efi::Status::SUCCESS
         }
 
-        let result = boot_services.locate_protocol(&DEVICE_PATH_PROTOCOL, None);
-        assert!(matches!(result, Ok(None)));
+        boot_services.locate_protocol_marker(&TestProtocolMarker, None).unwrap();
+    }
+
+    #[test]
+    #[should_panic = "Marker interface are not supported by locate_protocol, use locate_protocol_marker instead."]
+    fn test_locate_protocol_marker_with_locate_protocol() {
+        let boot_services = boot_services!(locate_protocol = efi_locate_protocol);
+
+        extern "efiapi" fn efi_locate_protocol(
+            _protocol_guid: *mut efi::Guid,
+            _registration: *mut c_void,
+            _interface: *mut *mut c_void,
+        ) -> efi::Status {
+            efi::Status::SUCCESS
+        }
+
+        unsafe { boot_services.locate_protocol(&TestProtocolMarker, None) }.unwrap();
     }
 
     #[test]
@@ -2109,8 +2936,8 @@ mod test {
     fn test_get_memory_map() {
         let boot_services = boot_services!(
             get_memory_map = efi_get_memory_map,
-            allocate_pool = efi_allocate_pool,
-            free_pool = efi_free_pool
+            allocate_pool = efi_allocate_pool_use_box,
+            free_pool = efi_free_pool_use_box
         );
 
         extern "efiapi" fn efi_get_memory_map(
@@ -2135,31 +2962,6 @@ mod test {
                 *descriptor_size = mem::size_of::<efi::MemoryDescriptor>();
                 *descriptor_version = 1;
             }
-            efi::Status::SUCCESS
-        }
-
-        extern "efiapi" fn efi_allocate_pool(
-            _mem_type: efi::MemoryType,
-            size: usize,
-            buffer: *mut *mut c_void,
-        ) -> efi::Status {
-            let allocation = vec![0u8; size].into_boxed_slice();
-
-            unsafe {
-                *buffer = Box::into_raw(allocation) as *mut c_void;
-            }
-            efi::Status::SUCCESS
-        }
-
-        extern "efiapi" fn efi_free_pool(buffer: *mut c_void) -> efi::Status {
-            if buffer.is_null() {
-                return efi::Status::INVALID_PARAMETER;
-            }
-
-            unsafe {
-                let _ = Box::from_raw(buffer as *mut u8);
-            }
-
             efi::Status::SUCCESS
         }
 
