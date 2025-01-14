@@ -1,9 +1,14 @@
 [package]
-name = "boot_services"
-version = "1.0.0"
-edition = "2021"
+name = "mu_uefi_boot_services"
+resolver = "2"
+version.workspace = true
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "Rust-friendly UEFI Boot Service wrappers."
 
 [lib]
+name = "boot_services"
 path = "src/boot_services.rs"
 
 [features]

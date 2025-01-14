@@ -1,9 +1,14 @@
 [package]
-name = "guid"
-version = "0.1.0"
-edition = "2021"
+name = "mu_uefi_guid"
+resolver = "2"
+version.workspace = true
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "UEFI GUID support."
 
 [lib]
+name = "guid"
 path = "src/guid.rs"
 
 [dependencies]

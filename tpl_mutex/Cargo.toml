@@ -1,16 +1,20 @@
 [package]
-name = "tpl_mutex"
-version = "0.1.0"
-edition = "2021"
+name = "mu_uefi_tpl_mutex"
 resolver = "2"
+version.workspace = true
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "Task Priority Level (TPL) mutual exclusion support."
 
 [lib]
+name = "tpl_mutex"
 path = "src/tpl_mutex.rs"
 
 [dependencies]
 r-efi = { workspace=true }
-boot_services = { workspace=true }
+mu_uefi_boot_services = { workspace=true }
 
 [dev-dependencies]
 mockall = { version = "0.13.0" }
-boot_services = { workspace=true, features = ["mockall"]}
+mu_uefi_boot_services = { workspace=true, features = ["mockall"]}
