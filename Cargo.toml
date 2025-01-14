@@ -52,14 +52,14 @@ tpl_mutex = ["dep:mu_uefi_tpl_mutex"]
 uefi_decompress = ["dep:mu_uefi_decompress"]
 
 [dependencies]
-mu_uefi_boot_services = { path = "./boot_services", version = "2", optional = true }
-mu_uefi_decompress = { path = "./uefi_decompress", version = "2", optional = true }
-mu_uefi_guid = { path = "./guid", version = "2", optional = true }
+mu_uefi_boot_services = { workspace = true, optional = true }
+mu_uefi_decompress = { workspace = true, optional = true }
+mu_uefi_guid = { workspace = true, optional = true }
 mu_uefi_perf_timer = { path = "./perf_timer", version = "2", optional = true }
-mu_uefi_runtime_services = { path = "./runtime_services", version = "2", optional = true }
-mu_uefi_tpl_mutex = { path = "./tpl_mutex", version = "2", optional = true }
+mu_uefi_runtime_services = { workspace = true, optional = true }
+mu_uefi_tpl_mutex = { workspace = true, optional = true }
 
 [dev-dependencies]
-mu_uefi_boot_services = { path = "./boot_services", version = "2", features = ["mockall"]}
+mu_uefi_boot_services = { workspace = true, features = ["mockall"]}
 r-efi = { workspace = true }
-mu_uefi_runtime_services = { path = "./runtime_services", version = "2", features = ["mockall"]}
+mu_uefi_runtime_services = { workspace = true, features = ["mockall"]}
