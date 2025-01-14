@@ -6,9 +6,15 @@ Most Project Mu Rust repos contain an individual feature. This repo contains cod
 for UEFI Rust code. The repo is composed of separate crates for different purposes. Therefore, the code maintained in
 this repo may overall be less cohesive than other repos.
 
+## Current State
+
+This repository is in the early stages of development. The crate is not complete and should not be used in production
+at this time. Major changes to the API may occur. We are interested in feedback and contributions and we want the
+flexibility to make changes as needed.
+
 ## Requirements
 
-- rustc >= 1.68.0
+![rustc Version](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmicrosoft%2Fmu_rust_helpers%2Frefs%2Fheads%2Fmain%2Frust-toolchain.toml&query=%24.toolchain.channel&style=for-the-badge&logo=rust&logoColor=FFC832&label=rustc%20version&color=0B7261)
 
 ## Build
 

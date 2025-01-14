@@ -1,9 +1,14 @@
 [package]
-name = "runtime_services"
-version = "0.1.0"
-edition = "2021"
+name = "mu_uefi_runtime_services"
+resolver = "2"
+version.workspace = true
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "Rust-friendly UEFI Runtime Service wrappers."
 
 [lib]
+name = "runtime_services"
 path = "src/runtime_services.rs"
 
 [features]

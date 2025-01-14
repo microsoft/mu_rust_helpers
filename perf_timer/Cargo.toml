@@ -1,7 +1,14 @@
 [package]
+name = "mu_uefi_perf_timer"
+resolver = "2"
+version.workspace = true
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "Performance timer support."
+
+[lib]
 name = "perf_timer"
-version = "0.1.0"
-edition = "2021"
 
 [features]
 default = []
