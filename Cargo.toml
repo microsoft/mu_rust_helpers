@@ -1,11 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
-    "boot_services",
     "guid",
     "perf_timer",
     "runtime_services",
-    "tpl_mutex",
     "uefi_decompress",
 ]
 
@@ -24,11 +22,9 @@ include = [
 
 [workspace.dependencies]
 log = "~0.4"
-mu_uefi_boot_services = { path="./boot_services", version = "2" }
 mu_uefi_decompress = { path="./uefi_decompress", version = "2" }
 mu_uefi_guid = { path="./guid", version = "2" }
 mu_uefi_runtime_services = { path="./runtime_services", version = "2" }
-mu_uefi_tpl_mutex = { path="./tpl_mutex", version = "2" }
 r-efi = "5.1.0"
 uuid = { version = "1.10.0", default-features = false}
 
@@ -43,23 +39,18 @@ edition.workspace = true
 include.workspace = true
 
 [features]
-boot_services = ["dep:mu_uefi_boot_services"]
-default = ["boot_services", "runtime_services", "guid", "tpl_mutex", "uefi_decompress", "perf_timer"]
+default = ["runtime_services", "guid", "uefi_decompress", "perf_timer"]
 guid = ["dep:mu_uefi_guid"]
 perf_timer = ["dep:mu_uefi_perf_timer"]
 runtime_services = ["dep:mu_uefi_runtime_services"]
-tpl_mutex = ["dep:mu_uefi_tpl_mutex"]
 uefi_decompress = ["dep:mu_uefi_decompress"]
 
 [dependencies]
-mu_uefi_boot_services = { workspace = true, optional = true }
 mu_uefi_decompress = { workspace = true, optional = true }
 mu_uefi_guid = { workspace = true, optional = true }
 mu_uefi_perf_timer = { path = "./perf_timer", version = "2", optional = true }
 mu_uefi_runtime_services = { workspace = true, optional = true }
-mu_uefi_tpl_mutex = { workspace = true, optional = true }
 
 [dev-dependencies]
-mu_uefi_boot_services = { workspace = true, features = ["mockall"]}
 r-efi = { workspace = true }
 mu_uefi_runtime_services = { workspace = true, features = ["mockall"]}
