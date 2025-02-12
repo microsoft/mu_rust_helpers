@@ -4,9 +4,6 @@ extern crate alloc;
 
 pub mod macros;
 
-#[cfg(feature = "runtime_services")]
-pub use runtime_services;
-
 #[cfg(feature = "guid")]
 pub use guid;
 
