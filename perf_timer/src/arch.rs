@@ -57,13 +57,9 @@ pub(crate) mod x64 {
                 return cached;
             }
 
-            let CpuidResult { eax, .. } = unsafe { x86_64::__cpuid(0x16) };
-            if eax != 0 {
-                // Use leaf 0x16, which gives the frequency in MHz.
-                let frequency = (eax * 1_000_000) as u64;
-                CPU_FREQUENCY.store(frequency, Ordering::Relaxed);
-                log::info!("Used CPUID leaf 0x16 to determine CPU frequency: {}", frequency);
-                return frequency;
+            let hypervisor_leaf = unsafe { x86_64::__cpuid(0x40000000) };
+            if hypervisor_leaf.eax != 0 {
+                log::warn!("Running in a VM - CPUID-based frequency may not be reliable.");
             }
 
             let CpuidResult {
@@ -73,11 +69,20 @@ pub(crate) mod x64 {
                 ..
             } = unsafe { x86_64::__cpuid(0x15) };
 
-            if ecx != 0 && eax != 0 && ebx != 0 {
+            if hypervisor_leaf.eax == 0 && ecx != 0 && eax != 0 && ebx != 0 {
                 // Use leaf 0x15
                 let frequency = (ecx as u64 * ebx as u64) / eax as u64;
                 CPU_FREQUENCY.store(frequency, Ordering::Relaxed);
                 log::info!("Used CPUID leaf 0x15 to determine CPU frequency: {}", frequency);
+                return frequency;
+            }
+
+            let CpuidResult { eax, .. } = unsafe { x86_64::__cpuid(0x16) };
+            if eax != 0 {
+                // Use leaf 0x16, which gives the frequency in MHz.
+                let frequency = (eax * 1_000_000) as u64;
+                CPU_FREQUENCY.store(frequency, Ordering::Relaxed);
+                log::info!("Used CPUID leaf 0x16 to determine CPU frequency: {}", frequency);
                 return frequency;
             }
 
