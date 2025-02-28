@@ -9,7 +9,6 @@ pub use aarch64::Aarch64 as Arch;
 // QEMU uses the ACPI frequency when CPUID-based frequency determination is not available.
 const QEMU_DEFAULT_FREQUENCY: u64 = 3579545;
 
-//
 static CPU_FREQUENCY: AtomicU64 = AtomicU64::new(0);
 
 pub trait ArchFunctionality {
@@ -53,17 +52,20 @@ pub(crate) mod x64 {
         }
 
         fn cpu_count_frequency() -> u64 {
-            let cpuid = unsafe { core::arch::x86_64::__cpuid(0x16) };
-            if cpuid.eax != 0 {
-                log::info!("CPU frequency from leaf 0x16: {} MHz", cpuid.eax as u64 * 1_000_000);
-            }
-
             let cached = CPU_FREQUENCY.load(Ordering::Relaxed);
             if cached != 0 {
                 return cached;
             }
 
-            // https://en.wikipedia.org/wiki/CPUID
+            let CpuidResult { eax, .. } = unsafe { x86_64::__cpuid(0x16) };
+            if eax != 0 {
+                // Use leaf 0x16, which gives the frequency in MHz.
+                let frequency = (eax * 1_000_000) as u64;
+                CPU_FREQUENCY.store(frequency, Ordering::Relaxed);
+                log::info!("Used CPUID leaf 0x16 to determine CPU frequency: {}", frequency);
+                return frequency;
+            }
+
             let CpuidResult {
                 eax, // Ratio of TSC frequency to Core Crystal Clock frequency, denominator.
                 ebx, // Ratio of TSC frequency to Core Crystal Clock frequency, numerator.
@@ -71,19 +73,18 @@ pub(crate) mod x64 {
                 ..
             } = unsafe { x86_64::__cpuid(0x15) };
 
-            let frequency = if ecx == 0 {
-                #[cfg(feature = "validate_cpu_features")]
-                log::warn!("CPU does not support CPUID-based frequency determination");
+            if ecx != 0 && eax != 0 && ebx != 0 {
+                // Use leaf 0x15
+                let frequency = (ecx as u64 * ebx as u64) / eax as u64;
+                CPU_FREQUENCY.store(frequency, Ordering::Relaxed);
+                log::info!("Used CPUID leaf 0x15 to determine CPU frequency: {}", frequency);
+                return frequency;
+            }
 
-                QEMU_DEFAULT_FREQUENCY
-            } else {
-                (ecx * (ebx / eax)) as u64
-            };
+            log::warn!("Unable to determine CPU frequency using CPUID leaves, using default ACPI timer frequency");
 
-            CPU_FREQUENCY.store(frequency, Ordering::Relaxed);
-            log::info!("CPU frequency from leaf 0x15 {}", frequency);
-
-            frequency
+            CPU_FREQUENCY.store(QEMU_DEFAULT_FREQUENCY, Ordering::Relaxed);
+            QEMU_DEFAULT_FREQUENCY
         }
     }
 }
