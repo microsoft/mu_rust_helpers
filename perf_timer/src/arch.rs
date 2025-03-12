@@ -7,7 +7,7 @@ pub use x64::X64 as Arch;
 pub use aarch64::Aarch64 as Arch;
 
 // QEMU uses the ACPI frequency when CPUID-based frequency determination is not available.
-const QEMU_DEFAULT_FREQUENCY: u64 = 3579545;
+const DEFAULT_ACPI_TIMER_FREQUENCY: u64 = 3579545;
 
 static CPU_FREQUENCY: AtomicU64 = AtomicU64::new(0);
 
@@ -73,7 +73,7 @@ pub(crate) mod x64 {
                 // Use leaf 0x15
                 let frequency = (ecx as u64 * ebx as u64) / eax as u64;
                 CPU_FREQUENCY.store(frequency, Ordering::Relaxed);
-                log::info!("Used CPUID leaf 0x15 to determine CPU frequency: {}", frequency);
+                log::trace!("Used CPUID leaf 0x15 to determine CPU frequency: {}", frequency);
                 return frequency;
             }
 
@@ -82,14 +82,14 @@ pub(crate) mod x64 {
                 // Use leaf 0x16, which gives the frequency in MHz.
                 let frequency = (eax * 1_000_000) as u64;
                 CPU_FREQUENCY.store(frequency, Ordering::Relaxed);
-                log::info!("Used CPUID leaf 0x16 to determine CPU frequency: {}", frequency);
+                log::trace!("Used CPUID leaf 0x16 to determine CPU frequency: {}", frequency);
                 return frequency;
             }
 
             log::warn!("Unable to determine CPU frequency using CPUID leaves, using default ACPI timer frequency");
 
-            CPU_FREQUENCY.store(QEMU_DEFAULT_FREQUENCY, Ordering::Relaxed);
-            QEMU_DEFAULT_FREQUENCY
+            CPU_FREQUENCY.store(DEFAULT_ACPI_TIMER_FREQUENCY, Ordering::Relaxed);
+            DEFAULT_ACPI_TIMER_FREQUENCY
         }
     }
 }
