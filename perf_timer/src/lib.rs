@@ -31,12 +31,12 @@ impl Instant {
 
     /// Create a new instant from a cpu count.
     pub fn from_cpu_count(cpu_count: u64) -> Self {
-        Self { cpu_count, frequency: Arch::cpu_count_frequency() }
+        Self { cpu_count, frequency: Arch::perf_frequency() }
     }
 
     /// Create a new instant from the start of the counter.
     pub fn beginning() -> Self {
-        Self { cpu_count: Arch::cpu_count_start(), frequency: Arch::cpu_count_frequency() }
+        Self { cpu_count: Arch::cpu_count_start(), frequency: Arch::perf_frequency() }
     }
 
     /// Return the amount of time from `earlier` adn this instant.
