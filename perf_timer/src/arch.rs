@@ -108,7 +108,7 @@ pub(crate) mod aarch64 {
             registers::CNTPCT_EL0.get()
         }
 
-        fn cpu_count_frequency() -> u64 {
+        fn perf_frequency() -> u64 {
             registers::CNTFRQ_EL0.get()
         }
     }
