@@ -1,4 +1,4 @@
-use core::{sync::atomic::AtomicU64, u64};
+use core::sync::atomic::AtomicU64;
 
 #[cfg(target_arch = "x86_64")]
 pub use x64::X64 as Arch;

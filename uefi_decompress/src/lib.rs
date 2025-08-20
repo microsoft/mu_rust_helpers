@@ -300,7 +300,7 @@ impl<'a> CodeIterator<'a> {
                             symbol = self.left[symbol as usize];
                         }
                         mask_idx += 1;
-                        if !(symbol as usize >= NT) {
+                        if (symbol as usize) < NT {
                             break;
                         }
                     }
@@ -390,7 +390,7 @@ impl<'a> CodeIterator<'a> {
 
                 mask_idx += 1;
 
-                if !(val as usize >= MAXNP) {
+                if val < MAXNP {
                     break;
                 }
             }
@@ -485,12 +485,12 @@ impl<'a> CodeIterator<'a> {
         // Determine weight of each length (the number of entries that a given symbol length will consume in the table).
         let mut weight = [0; 17];
         for idx in 1..=table_bits {
-            start[idx] = start[idx] >> extended_bits;
+            start[idx] >>= extended_bits;
             weight[idx] = 1 << (table_bits - idx);
         }
 
-        for idx in table_bits + 1..=16 {
-            weight[idx] = 1 << (16 - idx);
+        for (idx, w) in weight.iter_mut().enumerate().skip(table_bits + 1) {
+            *w = 1 << (16 - idx)
         }
 
         // zero unused table entries.
@@ -532,8 +532,9 @@ impl<'a> CodeIterator<'a> {
         let mask = 1 << (15 - table_bits);
 
         // iterate over all symbols in the alphabet to generate the table.
-        for char in 0..num_symbols {
-            let sym_bit_len = bit_lengths[char] as usize;
+        for (char, sym_bit_len) in bit_lengths.iter().enumerate().take(num_symbols) {
+            let sym_bit_len = *sym_bit_len as usize;
+
             // if the symbol length is zero, it is unused.
             if sym_bit_len == 0 {
                 continue;
@@ -582,8 +583,8 @@ impl<'a> CodeIterator<'a> {
                         }
                     }
 
-                    symbol_bitstring = symbol_bitstring << 1;
-                    idx = idx - 1;
+                    symbol_bitstring <<= 1;
+                    idx -= 1;
                 }
                 // set the final node to the decoded symbol.
                 pointer.set(table, left, right, char.try_into().expect("symbol count too large"));
@@ -596,7 +597,7 @@ impl<'a> CodeIterator<'a> {
     }
 }
 
-impl<'a> Iterator for CodeIterator<'a> {
+impl Iterator for CodeIterator<'_> {
     type Item = Result<CodeSymbol, DecompressError>;
 
     // Returns the next CodeSymbol from the bitstream.
@@ -664,7 +665,7 @@ impl<'a> Iterator for CodeIterator<'a> {
                     decode_idx = self.left[decode_idx] as usize;
                 }
                 mask_idx += 1;
-                if !(decode_idx >= NC) {
+                if decode_idx < NC {
                     break;
                 };
             }
