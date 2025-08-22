@@ -67,7 +67,7 @@ jobs:
       - task: PythonScript@0
         displayName: Rename coverage file
         env:
-          OUTPUT_DIR: $(Build.StagingDirectory)
+          OUTPUT_DIR: $(Build.SourcesDirectory)
         inputs:
           scriptSource: inline
           script: |
@@ -81,5 +81,5 @@ jobs:
 
       - template: Steps/UploadCodeCoverage.yml@mu_devops
         parameters:
-          report_dir: $(Build.StagingDirectory)
+          report_dir: $(Build.SourcesDirectory)
           install_dependencies: false
