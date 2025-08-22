@@ -67,19 +67,33 @@ jobs:
       - task: PythonScript@0
         displayName: Rename coverage file
         env:
-          OUTPUT_DIR: $(Build.SourcesDirectory)
+          OUTPUT_DIR: $(Build.SourcesDirectory)/target
         inputs:
           scriptSource: inline
           script: |
             import os
             import pathlib
 
+            def list_directory_contents(path, indent=4):
+              try:
+                for entry in os.listdir(path):
+                    full_path = os.path.join(path, entry)
+                    print("  " * indent + entry)
+                    if os.path.isdir(full_path):
+                        list_directory_contents(full_path, indent + 1)
+              except PermissionError:
+                print("  " * indent + "[Permission Denied]")
+ 
+
             OUTPUT_DIR = os.environ['OUTPUT_DIR']
+
+            list_directory_contents(".")
+
             original = pathlib.Path(OUTPUT_DIR, 'cobertura.xml')
             new = pathlib.Path(OUTPUT_DIR, 'coverage.xml')
             original.replace(new)
 
       - template: Steps/UploadCodeCoverage.yml@mu_devops
         parameters:
-          report_dir: $(Build.SourcesDirectory)
+          report_dir: $(Build.SourcesDirectory)/target
           install_dependencies: false
