@@ -33,6 +33,9 @@ pub fn decompress_into_with_algo(
     }
 
     let orig_size = u32::from_le_bytes(src[4..8].try_into().unwrap()) as usize;
+    if orig_size == 0 {
+        return Ok(());
+    }
     if orig_size != dst.len() {
         Err(DecompressError::InvalidDstSize)?;
     }
@@ -755,6 +758,23 @@ mod test {
         for (idx, (test, reference)) in zip(test_buffer, uncompressed_buffer).enumerate() {
             assert!(test == reference, "mismatch at idx: {:}, expected {:#x} != {:#x} actual", idx, reference, test);
         }
+    }
+
+    #[test]
+    fn decompress_with_original_size_of_zero_should_return_zero_sized_buffer() {
+        let mut compressed_file =
+            File::open(test_collateral!("compressed_empty.bin")).expect("failed to open test file");
+        
+        let mut compressed_buffer = Vec::new();
+        compressed_file.read_to_end(&mut compressed_buffer).expect("failed to read test file");
+
+        let mut uefi_uncompressed = Vec::new();
+        assert!(decompress_into_with_algo(&compressed_buffer, &mut uefi_uncompressed, crate::DecompressionAlgorithm::UefiDecompress).is_ok());
+        assert_eq!(uefi_uncompressed.len(), 0);
+
+        let mut tiano_uncompressed = Vec::new();
+        assert!(decompress_into_with_algo(&compressed_buffer, &mut tiano_uncompressed, crate::DecompressionAlgorithm::TianoDecompress).is_ok());
+        assert_eq!(tiano_uncompressed.len(), 0);
     }
 
     #[test]
