@@ -762,11 +762,10 @@ mod test {
 
     #[test]
     fn decompress_with_original_size_of_zero_should_return_zero_sized_buffer() {
-        let mut compressed_file =
-            File::open(test_collateral!("compressed_empty.bin")).expect("failed to open test file");
-        
-        let mut compressed_buffer = Vec::new();
-        compressed_file.read_to_end(&mut compressed_buffer).expect("failed to read test file");
+        // Setup a compressed buffer where the original size is zero but the compressed size is non-zero.
+        // This is represented by a 16-byte buffer where the first byte is 0x08 (indicating compressed size is 8).
+        let mut compressed_buffer = [0x0; 16];
+        compressed_buffer[0] = 0x08;
 
         let mut uefi_uncompressed = Vec::new();
         assert!(decompress_into_with_algo(&compressed_buffer, &mut uefi_uncompressed, crate::DecompressionAlgorithm::UefiDecompress).is_ok());
