@@ -10,6 +10,8 @@ pub use aarch64::Aarch64 as Arch;
 const DEFAULT_ACPI_TIMER_FREQUENCY: u64 = 3579545;
 
 static PERF_FREQUENCY: AtomicU64 = AtomicU64::new(0);
+const PM_TIMER_PORT: u16 = 0x408;
+const PM_TIMER_FREQ_HZ: u64 = 3_579_545; // 3.579 MHz
 
 pub trait ArchFunctionality {
     /// Value of the counter.
@@ -91,9 +93,71 @@ pub(crate) mod x64 {
             }
 
             log::warn!("Unable to determine CPU frequency using CPUID leaves, using default ACPI timer frequency");
+            let alt_freq = self::calibrate_tsc_frequency();
+            log::info!("Calibrated TSC frequency: {}", alt_freq);
 
-            PERF_FREQUENCY.store(DEFAULT_ACPI_TIMER_FREQUENCY, Ordering::Relaxed);
-            DEFAULT_ACPI_TIMER_FREQUENCY
+            PERF_FREQUENCY.store(alt_freq, Ordering::Relaxed);
+            alt_freq
+        }
+    }
+
+    unsafe fn read_pm_timer() -> u32 {
+        let value: u32;
+        core::arch::asm!(
+            "in eax, dx",
+            in("dx") 0x608u16,  // Port obtained from FADT
+            out("eax") value,
+            options(nomem, nostack, preserves_flags),
+        );
+        value
+    }
+
+    /// Measure TSC frequency by comparing against ACPI PM Timer
+    pub fn calibrate_tsc_frequency() -> u64 {
+        log::info!("Calibrating TSC frequency using ACPI PM Timer...");
+        unsafe {
+            // Wait for a PM timer edge to avoid partial intervals
+            let mut start_pm = read_pm_timer();
+            let mut next_pm;
+            loop {
+                next_pm = read_pm_timer();
+                if next_pm != start_pm {
+                    break;
+                }
+            }
+            start_pm = next_pm;
+
+            // Record starting TSC
+            let start_tsc = x86_64::_rdtsc();
+
+            // Hz = ticks/second. Divided by 20 ~ ticks / 50 ms
+            const TARGET_INTERVAL_SIZE: u64 = 20;
+            let target_ticks = (PM_TIMER_FREQ_HZ / TARGET_INTERVAL_SIZE) as u32;
+
+            let mut end_pm;
+            loop {
+                end_pm = read_pm_timer();
+                let delta = end_pm.wrapping_sub(start_pm);
+                if delta >= target_ticks {
+                    break;
+                }
+            }
+
+            // Record ending TSC
+            let end_tsc = x86_64::_rdtsc();
+
+            // Time elapsed based on PM timer ticks
+            let delta_pm = end_pm.wrapping_sub(start_pm) as u64;
+            let delta_time_ns = (delta_pm * 1_000_000_000) / PM_TIMER_FREQ_HZ;
+
+            // Rdtsc ticks
+            let delta_tsc = end_tsc - start_tsc;
+
+            // Frequency = Rdstc ticks / elapsed time
+            let freq_hz = (delta_tsc * 1_000_000_000) / delta_time_ns;
+
+            log::info!("Calibrated TSC frequency: {} Hz over {} ns ({} PM ticks)", freq_hz, delta_time_ns, delta_pm);
+            freq_hz
         }
     }
 }
