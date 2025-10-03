@@ -8,10 +8,8 @@ pub use aarch64::Aarch64 as Arch;
 
 // QEMU uses the ACPI frequency when CPUID-based frequency determination is not available.
 const DEFAULT_ACPI_TIMER_FREQUENCY: u64 = 3579545;
-
 static PERF_FREQUENCY: AtomicU64 = AtomicU64::new(0);
-const PM_TIMER_PORT: u16 = 0x408;
-const PM_TIMER_FREQ_HZ: u64 = 3_579_545; // 3.579 MHz
+const PM_TIMER_PORT: u16 = 0x608; // Obtained through FADT's X_PM_TMR_BLK field
 
 pub trait ArchFunctionality {
     /// Value of the counter.
@@ -94,7 +92,6 @@ pub(crate) mod x64 {
 
             log::warn!("Unable to determine CPU frequency using CPUID leaves, using default ACPI timer frequency");
             let alt_freq = self::calibrate_tsc_frequency();
-            log::info!("Calibrated TSC frequency: {}", alt_freq);
 
             PERF_FREQUENCY.store(alt_freq, Ordering::Relaxed);
             alt_freq
@@ -105,7 +102,7 @@ pub(crate) mod x64 {
         let value: u32;
         core::arch::asm!(
             "in eax, dx",
-            in("dx") 0x608u16,  // Port obtained from FADT
+            in("dx") PM_TIMER_PORT,
             out("eax") value,
             options(nomem, nostack, preserves_flags),
         );
@@ -114,7 +111,6 @@ pub(crate) mod x64 {
 
     /// Measure TSC frequency by comparing against ACPI PM Timer
     pub fn calibrate_tsc_frequency() -> u64 {
-        log::info!("Calibrating TSC frequency using ACPI PM Timer...");
         unsafe {
             // Wait for a PM timer edge to avoid partial intervals
             let mut start_pm = read_pm_timer();
@@ -132,7 +128,7 @@ pub(crate) mod x64 {
 
             // Hz = ticks/second. Divided by 20 ~ ticks / 50 ms
             const TARGET_INTERVAL_SIZE: u64 = 20;
-            let target_ticks = (PM_TIMER_FREQ_HZ / TARGET_INTERVAL_SIZE) as u32;
+            let target_ticks = (DEFAULT_ACPI_TIMER_FREQUENCY / TARGET_INTERVAL_SIZE) as u32;
 
             let mut end_pm;
             loop {
@@ -148,7 +144,7 @@ pub(crate) mod x64 {
 
             // Time elapsed based on PM timer ticks
             let delta_pm = end_pm.wrapping_sub(start_pm) as u64;
-            let delta_time_ns = (delta_pm * 1_000_000_000) / PM_TIMER_FREQ_HZ;
+            let delta_time_ns = (delta_pm * 1_000_000_000) / DEFAULT_ACPI_TIMER_FREQUENCY;
 
             // Rdtsc ticks
             let delta_tsc = end_tsc - start_tsc;
