@@ -7,7 +7,7 @@ members = [
 ]
 
 [workspace.package]
-version = "3.0.1"
+version = "3.0.2"
 repository = "https://github.com/microsoft/mu_rust_helpers"
 license = "BSD-2-Clause-Patent"
 edition = "2021"
@@ -49,3 +49,4 @@ mu_uefi_perf_timer = { path = "./perf_timer", version = "3", optional = true }
 
 [dev-dependencies]
 r-efi = { workspace = true }
+
