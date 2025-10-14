@@ -15,7 +15,7 @@ default = []
 validate_cpu_features = []
 
 [target.'cfg(target_arch="aarch64")'.dependencies]
-aarch64-cpu = { version = "10.0.0", optional = false }
+aarch64-cpu = { version = "11.0.0", optional = false }
 
 [dependencies]
 log = "~0.4"
