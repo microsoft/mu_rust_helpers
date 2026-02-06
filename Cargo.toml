@@ -23,7 +23,7 @@ include = [
 log = "~0.4"
 mu_uefi_decompress = { path="./uefi_decompress", version = "3" }
 mu_uefi_guid = { path="./guid", version = "3" }
-r-efi = "5.1.0"
+r-efi = "6"
 uuid = { version = "1.10.0", default-features = false}
 
 [package]
@@ -49,4 +49,3 @@ mu_uefi_perf_timer = { path = "./perf_timer", version = "3", optional = true }
 
 [dev-dependencies]
 r-efi = { workspace = true }
-
