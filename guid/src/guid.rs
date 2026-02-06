@@ -1,4 +1,4 @@
-#![cfg_attr(target_os = "uefi", no_std)]
+#![cfg_attr(not(test), no_std)]
 
 use r_efi::efi;
 pub use uuid::uuid;
