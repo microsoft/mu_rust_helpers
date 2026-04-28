@@ -1,15 +1,11 @@
-use core::sync::atomic::AtomicU64;
+#[cfg(target_arch = "x86")]
+pub use x86::X86 as Arch;
 
 #[cfg(target_arch = "x86_64")]
 pub use x64::X64 as Arch;
 
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::Aarch64 as Arch;
-
-// QEMU uses the ACPI frequency when CPUID-based frequency determination is not available.
-const DEFAULT_ACPI_TIMER_FREQUENCY: u64 = 3579545;
-
-static PERF_FREQUENCY: AtomicU64 = AtomicU64::new(0);
 
 pub trait ArchFunctionality {
     /// Value of the counter.
@@ -29,10 +25,16 @@ pub trait ArchFunctionality {
 #[cfg(target_arch = "x86_64")]
 pub(crate) mod x64 {
     use super::*;
+    use core::sync::atomic::AtomicU64;
     use core::{
         arch::x86_64::{self, CpuidResult},
         sync::atomic::Ordering,
     };
+
+    // QEMU uses the ACPI frequency when CPUID-based frequency determination is not available.
+    const DEFAULT_ACPI_TIMER_FREQUENCY: u64 = 3579545;
+
+    static PERF_FREQUENCY: AtomicU64 = AtomicU64::new(0);
 
     pub struct X64;
     impl ArchFunctionality for X64 {
@@ -110,6 +112,21 @@ pub(crate) mod aarch64 {
 
         fn perf_frequency() -> u64 {
             registers::CNTFRQ_EL0.get()
+        }
+    }
+}
+
+#[cfg(target_arch = "x86")]
+pub(crate) mod x86 {
+    use super::*;
+    pub struct X86;
+    impl ArchFunctionality for X86 {
+        fn cpu_count() -> u64 {
+            unimplemented!()
+        }
+
+        fn perf_frequency() -> u64 {
+            unimplemented!()
         }
     }
 }
