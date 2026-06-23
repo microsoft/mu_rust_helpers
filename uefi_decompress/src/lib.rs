@@ -768,11 +768,21 @@ mod test {
         compressed_buffer[0] = 0x08;
 
         let mut uefi_uncompressed = Vec::new();
-        assert!(decompress_into_with_algo(&compressed_buffer, &mut uefi_uncompressed, crate::DecompressionAlgorithm::UefiDecompress).is_ok());
+        assert!(decompress_into_with_algo(
+            &compressed_buffer,
+            &mut uefi_uncompressed,
+            crate::DecompressionAlgorithm::UefiDecompress
+        )
+        .is_ok());
         assert_eq!(uefi_uncompressed.len(), 0);
 
         let mut tiano_uncompressed = Vec::new();
-        assert!(decompress_into_with_algo(&compressed_buffer, &mut tiano_uncompressed, crate::DecompressionAlgorithm::TianoDecompress).is_ok());
+        assert!(decompress_into_with_algo(
+            &compressed_buffer,
+            &mut tiano_uncompressed,
+            crate::DecompressionAlgorithm::TianoDecompress
+        )
+        .is_ok());
         assert_eq!(tiano_uncompressed.len(), 0);
     }
 

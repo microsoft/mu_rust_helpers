@@ -7,7 +7,7 @@ members = [
 ]
 
 [workspace.package]
-version = "4.0.0"
+version = "4.1.0"
 repository = "https://github.com/microsoft/mu_rust_helpers"
 license = "BSD-2-Clause-Patent"
 edition = "2021"
@@ -23,7 +23,7 @@ include = [
 log = "~0.4"
 mu_uefi_decompress = { path="./uefi_decompress", version = "4" }
 mu_uefi_guid = { path="./guid", version = "4" }
-r-efi = "6"
+r-efi = "7"
 uuid = { version = "1.10.0", default-features = false}
 
 [package]
