@@ -23,7 +23,7 @@ include = [
 log = "~0.4"
 mu_uefi_decompress = { path="./uefi_decompress", version = "4" }
 mu_uefi_guid = { path="./guid", version = "4" }
-r-efi = "6"
+r-efi = "7"
 uuid = { version = "1.10.0", default-features = false}
 
 [package]
