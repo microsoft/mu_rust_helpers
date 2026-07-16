@@ -1,5 +1,8 @@
 # Mu Rust Helpers
 
+> **DEPRECATED**: This repository has been deprecated. Most functionality has moved to the [patina](https://crates.io/crates/patina)
+> crate.
+
 [Project Mu](https://microsoft.github.io/mu) Rust UEFI helper code.
 
 Most Project Mu Rust repos contain an individual feature. This repo contains code that provides helper functionality

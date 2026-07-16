@@ -1,3 +1,4 @@
+#![deprecated(since = "5.0.0", note = "This crate has been deprecated; please use the patina crate instead.")]
 #![no_std]
 use bitvec::{field::BitField, order::Msb0, slice::BitSlice, view::BitView};
 

@@ -7,7 +7,7 @@ members = [
 ]
 
 [workspace.package]
-version = "4.1.0"
+version = "5.0.0"
 repository = "https://github.com/microsoft/mu_rust_helpers"
 license = "BSD-2-Clause-Patent"
 edition = "2021"
@@ -21,14 +21,14 @@ include = [
 
 [workspace.dependencies]
 log = "~0.4"
-mu_uefi_decompress = { path="./uefi_decompress", version = "4" }
-mu_uefi_guid = { path="./guid", version = "4" }
+mu_uefi_decompress = { path="./uefi_decompress", version = "5" }
+mu_uefi_guid = { path="./guid", version = "5" }
 r-efi = "7"
 uuid = { version = "1.10.0", default-features = false}
 
 [package]
 name = "mu_rust_helpers"
-description = "Helper functions for UEFI Rust applications"
+description = "DEPRECATED: Please use the patina crate instead. Helper functions for UEFI Rust applications."
 readme = "README.md"
 version.workspace = true
 repository.workspace = true
@@ -45,7 +45,7 @@ uefi_decompress = ["dep:mu_uefi_decompress"]
 [dependencies]
 mu_uefi_decompress = { workspace = true, optional = true }
 mu_uefi_guid = { workspace = true, optional = true }
-mu_uefi_perf_timer = { path = "./perf_timer", version = "4", optional = true }
+mu_uefi_perf_timer = { path = "./perf_timer", version = "5", optional = true }
 
 [dev-dependencies]
 r-efi = { workspace = true }
