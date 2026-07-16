@@ -1,3 +1,4 @@
+#![deprecated(since = "5.0.0", note = "This crate is deprecated and no longer updated.")]
 #![cfg_attr(not(test), no_std)]
 
 mod arch;

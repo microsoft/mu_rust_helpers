@@ -1,3 +1,4 @@
+#![deprecated(since = "5.0.0", note = "This crate has been deprecated; please use the patina crate instead.")]
 #![cfg_attr(target_os = "uefi", no_std)]
 
 use r_efi::efi;

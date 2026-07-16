@@ -1,3 +1,5 @@
+#![deprecated(since = "5.0.0", note = "This crate has been deprecated; please use the patina crate instead.")]
+#![allow(deprecated)]
 #![cfg_attr(not(test), no_std)]
 
 extern crate alloc;

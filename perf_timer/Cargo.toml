@@ -5,7 +5,7 @@ version.workspace = true
 repository.workspace = true
 license.workspace = true
 edition.workspace = true
-description = "Performance timer support."
+description = "DEPRECATED: No longer maintained. Performance timer support."
 
 [lib]
 name = "perf_timer"
